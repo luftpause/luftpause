@@ -54,6 +54,7 @@ SGLang's cache-aware router (below).
 ## Architecture
 
 ```mermaid
+%%{init: {"themeVariables": {"fontFamily": "-apple-system, Segoe UI, Helvetica, Arial, sans-serif"}, "flowchart": {"wrappingWidth": 260}}}%%
 flowchart LR
     mcp["Claude Code<br/>or any MCP client"]
     own["Agents with<br/>their own loop"]
