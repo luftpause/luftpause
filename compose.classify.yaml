@@ -1,0 +1,30 @@
+services:
+  vllm-classify:
+    image: vllm/vllm-openai:v0.10.1
+    command:
+      - --model
+      - cardiffnlp/twitter-roberta-base-sentiment-latest
+      - --task
+      - classify
+      - --gpu-memory-utilization
+      - "0.3"
+      - --max-model-len
+      - "512"
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  scheduler:
+    environment:
+      Engines__SinglePass__0__Id: vllm-classify
+      Engines__SinglePass__0__BaseUrl: http://vllm-classify:8000
+
+volumes:
+  hf_cache:

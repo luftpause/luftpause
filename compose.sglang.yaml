@@ -1,0 +1,39 @@
+services:
+  sglang:
+    image: lmsysorg/sglang:latest
+    command:
+      - python3
+      - -m
+      - sglang.launch_server
+      - --model-path
+      - RedHatAI/Llama-3.2-3B-Instruct-FP8
+      - --host
+      - 0.0.0.0
+      - --port
+      - "30000"
+      - --tool-call-parser
+      - llama3
+      - --enable-cache-report
+      - --enable-metrics
+      - --mem-fraction-static
+      - "0.75"
+      - --context-length
+      - "8192"
+    volumes:
+      - hf_cache:/root/.cache/huggingface
+    ipc: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  scheduler:
+    environment: !override
+      Engines__Generative__0__Id: sglang
+      Engines__Generative__0__BaseUrl: http://sglang:30000
+
+volumes:
+  hf_cache:

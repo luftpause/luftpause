@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package luftpause.v1;
+
+option csharp_namespace = "Luftpause.Protocol.V1";
+
+service Scheduler {
+  rpc Admit(TurnRequest) returns (Decision);
+  rpc Report(stream TurnEvent) returns (ReportAck);
+}
+
+enum EngineClass {
+  ENGINE_CLASS_UNSPECIFIED = 0;
+  ENGINE_CLASS_GENERATIVE = 1;
+  ENGINE_CLASS_SINGLE_PASS = 2;
+}
+
+enum ServiceClass {
+  SERVICE_CLASS_UNSPECIFIED = 0;
+  SERVICE_CLASS_INTERACTIVE = 1;
+  SERVICE_CLASS_BATCH = 2;
+}
+
+message TurnRequest {
+  string turn_id = 1;
+  string run_id = 2;
+  EngineClass engine_class = 3;
+  string model = 4;
+  reserved 5;
+  int64 at_unix_ms = 6;
+  bool resumed = 7;
+  ServiceClass service_class = 8;
+}
+
+message Decision {
+  oneof outcome {
+    Route route = 1;
+    Reject reject = 2;
+    Refuse refuse = 3;
+  }
+}
+
+message Route {
+  string replica_id = 1;
+  string base_url = 2;
+  reserved 3;
+  string path = 4;
+  string authorization = 5;
+}
+
+message Reject {
+  uint32 retry_after_ms = 1;
+  string reason = 2;
+}
+
+message Refuse {
+  string reason = 1;
+}
+
+message TurnEvent {
+  string turn_id = 1;
+  string run_id = 2;
+  int64 at_unix_ms = 3;
+  oneof kind {
+    TurnStarted started = 4;
+    FirstToken first_token = 5;
+    TurnCompleted completed = 6;
+  }
+}
+
+message TurnStarted {
+  string replica_id = 1;
+}
+
+message FirstToken {}
+
+message TurnCompleted {
+  string finish_reason = 1;
+  uint32 prompt_tokens = 2;
+  uint32 completion_tokens = 3;
+  uint32 cached_tokens = 4;
+  bool failed = 5;
+}
+
+message ReportAck {}
+

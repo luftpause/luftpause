@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Luftpause.Scheduler/Luftpause.Scheduler.csproj" />
+    <Project Path="src/Luftpause.Scheduling/Luftpause.Scheduling.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Luftpause.Scheduling.Tests/Luftpause.Scheduling.Tests.csproj" />
+  </Folder>
+  <Project Path="../runtime/src/Luftpause.Runtime/Luftpause.Runtime.csproj" />
+  <Project Path="../runtime/tests/Luftpause.Runtime.Tests/Luftpause.Runtime.Tests.csproj" />
+  <Project Path="../tools/loadgen/Luftpause.LoadGen.csproj" />
+</Solution>

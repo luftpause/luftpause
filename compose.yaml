@@ -1,0 +1,52 @@
+name: luftpause
+
+x-fake-engine: &fake-engine
+  image: luftpause-dataplane
+  command: ["fake-engine"]
+  depends_on: [dataplane]
+
+services:
+  scheduler:
+    build: { context: ., dockerfile: scheduler/Dockerfile }
+    image: luftpause-scheduler
+    environment:
+      Engines__Generative__0__Id: fake-a
+      Engines__Generative__0__BaseUrl: http://fake-engine-a:9000
+      Engines__Generative__1__Id: fake-b
+      Engines__Generative__1__BaseUrl: http://fake-engine-b:9000
+      Engines__SinglePass__0__Id: fake-classify
+      Engines__SinglePass__0__BaseUrl: http://fake-classify:9000
+      Engines__SinglePass__0__Kind: VllmClassify
+
+  dataplane:
+    build: { context: ., dockerfile: dataplane/Dockerfile }
+    image: luftpause-dataplane
+    command: ["dataplane"]
+    environment:
+      SCHEDULER_URL: http://scheduler:5000
+    ports: ["8080:8080"]
+    depends_on: [scheduler]
+
+  runtime:
+    build: { context: ., dockerfile: runtime/Dockerfile }
+    image: luftpause-runtime
+    environment:
+      DataPlane__Url: http://dataplane:8080/
+      Runtime__Model: fake
+      Runtime__DecideModel: fake
+      Tools__Servers__0__Name: fake-tools
+      Tools__Servers__0__Url: http://fake-mcp:9100/mcp
+    ports: ["7000:7000"]
+    depends_on: [dataplane, fake-mcp]
+
+  fake-mcp:
+    image: luftpause-dataplane
+    command: ["fake-mcp"]
+    environment:
+      TOOL_MS_MEDIAN: 1000
+      TOOL_SIGMA: 0.5
+    depends_on: [dataplane]
+
+  fake-engine-a: *fake-engine
+  fake-engine-b: *fake-engine
+  fake-classify: *fake-engine

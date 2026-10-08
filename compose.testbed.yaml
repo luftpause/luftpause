@@ -1,0 +1,75 @@
+x-sglang: &sglang
+  image: lmsysorg/sglang:latest
+  command:
+    - python3
+    - -m
+    - sglang.launch_server
+    - --model-path
+    - ${SUBAGENT_MODEL:-RedHatAI/Llama-3.2-1B-Instruct-FP8}
+    - --host
+    - 0.0.0.0
+    - --port
+    - "30000"
+    - --tool-call-parser
+    - llama3
+    - --enable-cache-report
+    - --enable-metrics
+    - --mem-fraction-static
+    - "${SGLANG_MEM:-0.38}"
+    - --max-total-tokens
+    - "${SGLANG_KV_TOKENS:-24000}"
+    - --context-length
+    - "8192"
+    - --disable-prefill-cuda-graph
+    - --enable-priority-scheduling
+  volumes:
+    - hf_cache:/root/.cache/huggingface
+  ipc: host
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            count: 1
+            capabilities: [gpu]
+
+services:
+  sglang-a: *sglang
+  sglang-b: *sglang
+
+  scheduler:
+    environment: !override
+      Engines__Generative__0__Id: sglang-a
+      Engines__Generative__0__BaseUrl: http://sglang-a:30000
+      Engines__Generative__0__Models__0: ${SUBAGENT_MODEL:-RedHatAI/Llama-3.2-1B-Instruct-FP8}
+      Engines__Generative__1__Id: sglang-b
+      Engines__Generative__1__BaseUrl: http://sglang-b:30000
+      Engines__Generative__1__Models__0: ${SUBAGENT_MODEL:-RedHatAI/Llama-3.2-1B-Instruct-FP8}
+      Experiment__Routing: ${ROUTING:-affinity}
+
+  runtime:
+    environment:
+      Runtime__Model: ${SUBAGENT_MODEL:-RedHatAI/Llama-3.2-1B-Instruct-FP8}
+      Experiment__EnginePriority: ${ENGINE_PRIORITY:-false}
+      DataPlane__Url: ${DATAPLANE_URL:-http://dataplane:8080/}
+      Tools__Servers__1__Name: wikipedia
+      Tools__Servers__1__Command: /opt/tools/bin/wikipedia-mcp
+      Tools__Servers__1__Args__0: --transport
+      Tools__Servers__1__Args__1: stdio
+
+  sgl-router:
+    image: lmsysorg/sglang:latest
+    entrypoint: ["python3", "-m", "sglang_router.launch_router"]
+    command: ["--worker-urls", "http://sglang-a:30000", "http://sglang-b:30000", "--policy", "${ROUTER_POLICY:-cache_aware}", "--host", "0.0.0.0", "--port", "30100"]
+    profiles: ["router"]
+
+  fake-mcp:
+    environment: !override
+      TOOL_MS_MEDIAN: ${TOOL_MS_MEDIAN:-2000}
+      TOOL_SIGMA: ${TOOL_SIGMA:-0.8}
+      TOOL_MS_MAX: ${TOOL_MS_MAX:-20000}
+      DEEP_MS_MEDIAN: ${DEEP_MS_MEDIAN:-45000}
+      RESULT_CHARS: 2000
+
+volumes:
+  hf_cache:

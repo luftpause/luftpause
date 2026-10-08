@@ -1,0 +1,13 @@
+services:
+  scheduler:
+    environment:
+      RUNPOD_KEY: ${RUNPOD_KEY:?set RUNPOD_KEY to the pod's API key}
+      Engines__Generative__2__Id: runpod
+      Engines__Generative__2__BaseUrl: https://${RUNPOD_POD_ID:?set RUNPOD_POD_ID}-8000.proxy.runpod.net
+      Engines__Generative__2__Models__0: ${RUNPOD_MODEL:-llama-3.3-70b}
+      Engines__Generative__2__ApiKeyEnv: RUNPOD_KEY
+      Engines__Generative__2__HealthPath: /v1/models
+
+  runtime:
+    environment:
+      Runtime__Model: ${RUNPOD_MODEL:-llama-3.3-70b}
