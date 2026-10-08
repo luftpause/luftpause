@@ -53,15 +53,33 @@ SGLang's cache-aware router (below).
 
 ## Architecture
 
-```
-Claude Code / any MCP client ──MCP──► runtime (.NET): spawn / await / status / cancel / decide
-                                         │  sub-agent loops        └── tools ──MCP──► tool servers
-                                         ▼
-agents (own loop) ──HTTP/SSE──►  dataplane (Rust)  ──proxied turns──► engines (SGLang, vLLM, …)
-                                   │   ▲
-                     Report(events)│   │ Admit → Route | Reject | Refuse
-                                   ▼   │
-                              scheduler (.NET)  decide(state, event) → (state, actions)
+```mermaid
+flowchart LR
+    mcp["Claude Code<br/>or any MCP client"]
+    own["Agents with<br/>their own loop"]
+
+    subgraph lp["luftpause"]
+        runtime["<b>runtime</b> · .NET<br/>spawn · await<br/>sub-agent loops"]
+        dp["<b>dataplane</b> · Rust<br/>OpenAI-compatible proxy"]
+        sched["<b>scheduler</b> · .NET<br/>decide(state, event)"]
+    end
+
+    tools[("MCP tool<br/>servers")]
+
+    subgraph pool["Engine pool"]
+        direction TB
+        engines["SGLang · vLLM"]
+        router["SGLang router"]
+        hosted["Hosted OpenAI-<br/>compatible APIs"]
+    end
+
+    mcp -- MCP --> runtime
+    own -- "HTTP / SSE" --> dp
+    runtime -- "tool calls" --> tools
+    runtime -- "LLM turns" --> dp
+    dp -- "turns" --> pool
+    sched <-- "Admit · Report" --> dp
+    sched -. "health · load" .-> pool
 ```
 
 - **runtime** (`runtime/`) — MCP server. Each spawned run is a .NET `Task` running
