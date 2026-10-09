@@ -84,7 +84,7 @@ fn lookup_tool() -> Value {
     json!({
         "name": "lookup",
         "description": "Look up one fact for a query.",
-        "inputSchema": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] }
+        "inputSchema": { "type": "object", "properties": { "query": { "type": "string" } } }
     })
 }
 
@@ -92,7 +92,7 @@ fn deep_search_tool() -> Value {
     json!({
         "name": "deep_search",
         "description": "Search the archives thoroughly for one fact. Slow.",
-        "inputSchema": { "type": "object", "properties": { "query": { "type": "string" } }, "required": ["query"] }
+        "inputSchema": { "type": "object", "properties": { "query": { "type": "string" } } }
     })
 }
 
