@@ -2,8 +2,6 @@ namespace Luftpause.Scheduling;
 
 public sealed class Decider(IRoutingPolicy routing)
 {
-    public const int NoReplicaRetryAfterMs = 1000;
-
     public Decision Decide(SchedulerState state, SchedulerEvent @event) => @event switch
     {
         TurnRequested request => Admit(state, request),
@@ -11,9 +9,7 @@ public sealed class Decider(IRoutingPolicy routing)
         TurnAbandoned abandoned => Drain(TurnLifecycle.Abandon(state, abandoned)),
         ReplicaHealthChanged health => Drain(Health.Apply(state, health)),
         ReplicaLoadReported load => Drain(EngineLoad.Apply(state, load)),
-        Tick tick => Decision.Unchanged(Expiry.Apply(state, tick))
-            .Then(s => WaitQueue.Expire(s, tick))
-            .Then(Drain),
+        Tick tick => Drain(Expiry.Apply(state, tick)),
         _ => Decision.Unchanged(state),
     };
 

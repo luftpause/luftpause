@@ -6,8 +6,6 @@ public abstract record SchedulerAction;
 
 public sealed record RouteTurn(string TurnId, Replica Replica) : SchedulerAction;
 
-public sealed record RejectTurn(string TurnId, int RetryAfterMs, string Reason) : SchedulerAction;
-
 public sealed record RefuseTurn(string TurnId, string Reason) : SchedulerAction;
 
 public sealed record Decision(SchedulerState State, ImmutableArray<SchedulerAction> Actions)

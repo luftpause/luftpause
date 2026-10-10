@@ -111,15 +111,15 @@ public class AdmissionTests
     }
 
     [Fact]
-    public void A_turn_waiting_past_the_limit_is_rejected()
+    public void A_waiting_turn_stays_queued_however_long_it_waits()
     {
         var full = Run(SchedulerState.Initial([A]), Load(running: 1, waiting: 1),
             Request("i1", ServiceClass.Interactive), Request("i2", ServiceClass.Interactive, at: 0));
 
-        var expired = Decider.Decide(full.State, new Tick(WaitQueue.MaxWaitMs + 1));
+        var later = Decider.Decide(full.State, new Tick(Expiry.TurnTimeoutMs - 1));
 
-        Assert.Equal(new RejectTurn("i2", WaitQueue.RetryAfterMs, "queue wait exceeded"), Assert.Single(expired.Actions));
-        Assert.Empty(expired.State.Waiting);
+        Assert.Empty(later.Actions);
+        Assert.Equal("i2", Assert.Single(later.State.Waiting).TurnId);
     }
 
     [Fact]

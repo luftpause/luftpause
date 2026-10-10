@@ -41,18 +41,11 @@ public static class ProtocolMapping
                     Authorization = credentials.AuthorizationFor(route.Replica.Id) ?? "",
                 },
             },
-            RejectTurn reject => new Proto.Decision
-            {
-                Reject = new Proto.Reject { RetryAfterMs = (uint)reject.RetryAfterMs, Reason = reject.Reason },
-            },
             RefuseTurn refuse => new Proto.Decision
             {
                 Refuse = new Proto.Refuse { Reason = refuse.Reason },
             },
-            _ => new Proto.Decision
-            {
-                Reject = new Proto.Reject { RetryAfterMs = Decider.NoReplicaRetryAfterMs, Reason = "no decision" },
-            },
+            _ => throw new ArgumentOutOfRangeException(nameof(action), action, "not a decision"),
         };
 
     private static EngineClass ToEngineClass(Proto.EngineClass engineClass) => engineClass switch

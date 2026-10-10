@@ -13,7 +13,7 @@ use crate::events::{AdmitGuard, EventSink, TurnIds, now_unix_ms};
 use crate::observe::Format;
 use crate::proto::decision::Outcome;
 use crate::proto::scheduler_client::SchedulerClient;
-use crate::proto::{EngineClass, Refuse, Reject, Route, ServiceClass, TurnRequest};
+use crate::proto::{EngineClass, Refuse, Route, ServiceClass, TurnRequest};
 use crate::run_identity::{RunIndex, tool_result_ids};
 use crate::turn::{ObservedBody, TurnContext, TurnTimings};
 
@@ -63,7 +63,6 @@ async fn handle(app: AppState, headers: HeaderMap, body: Bytes, engine_class: En
 
     let mut response = match decision {
         Some(Outcome::Route(route)) => forward(&app, ids.clone(), route, body, timings).await,
-        Some(Outcome::Reject(reject)) => rejected(&reject),
         Some(Outcome::Refuse(refuse)) => refused(&refuse),
         None => error(StatusCode::SERVICE_UNAVAILABLE, "scheduler returned no decision"),
     };
@@ -141,13 +140,6 @@ async fn forward(app: &AppState, ids: TurnIds, route: Route, body: Bytes, timing
 
 fn engine_path(route: &Route) -> &str {
     if route.path.is_empty() { "/v1/chat/completions" } else { &route.path }
-}
-
-fn rejected(reject: &Reject) -> Response {
-    let seconds = reject.retry_after_ms.div_ceil(1000).max(1);
-    let mut response = error(StatusCode::TOO_MANY_REQUESTS, &reject.reason);
-    response.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from(seconds));
-    response
 }
 
 fn refused(refuse: &Refuse) -> Response {

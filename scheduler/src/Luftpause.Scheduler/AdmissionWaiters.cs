@@ -15,7 +15,6 @@ public sealed class AdmissionWaiters
         var turnId = action switch
         {
             RouteTurn route => route.TurnId,
-            RejectTurn reject => reject.TurnId,
             RefuseTurn refuse => refuse.TurnId,
             _ => null,
         };

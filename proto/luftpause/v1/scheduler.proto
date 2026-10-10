@@ -33,9 +33,9 @@ message TurnRequest {
 }
 
 message Decision {
+  reserved 2;
   oneof outcome {
     Route route = 1;
-    Reject reject = 2;
     Refuse refuse = 3;
   }
 }
@@ -46,11 +46,6 @@ message Route {
   reserved 3;
   string path = 4;
   string authorization = 5;
-}
-
-message Reject {
-  uint32 retry_after_ms = 1;
-  string reason = 2;
 }
 
 message Refuse {
