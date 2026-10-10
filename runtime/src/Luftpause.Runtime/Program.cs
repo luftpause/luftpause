@@ -9,7 +9,6 @@ var defaults = builder.Configuration.GetSection("Runtime").Get<RuntimeDefaults>(
 
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(defaults);
-builder.Services.AddSingleton(new EnginePriority(builder.Configuration.GetValue("Experiment:EnginePriority", false)));
 builder.Services.AddHttpClient<LlmClient>(http =>
 {
     http.BaseAddress = new Uri(dataPlane.EndsWith('/') ? dataPlane : dataPlane + "/");

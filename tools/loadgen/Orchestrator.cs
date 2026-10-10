@@ -10,7 +10,8 @@ namespace Luftpause.LoadGen;
 public sealed record SpawnOptions(
     Uri Endpoint, int Concurrency, string ServiceClass, string? Model, int DurationSeconds, int ContextChars, int MaxToolCalls,
     double DeepShare = 0,
-    bool Sequential = false);
+    bool Sequential = false,
+    int? MaxTokens = null);
 
 public static class Orchestrator
 {
@@ -102,6 +103,8 @@ public static class Orchestrator
         };
         if (options.Model is not null)
             arguments["model"] = options.Model;
+        if (options.MaxTokens is not null)
+            arguments["maxTokens"] = options.MaxTokens;
         var result = await client.CallToolAsync("spawn", arguments, cancellationToken: cancel);
         return Parse(result)?["handle"]?.GetValue<string>() ?? throw new InvalidOperationException($"spawn failed: {Text(result)}");
     }

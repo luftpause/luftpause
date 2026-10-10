@@ -11,8 +11,11 @@ public class LlmClientTests
 
         public int Sent => sent;
 
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
+        public JsonNode? LastBody { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
         {
+            LastBody = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancel));
             var status = statuses[Math.Min(sent++, statuses.Length - 1)];
             var response = new HttpResponseMessage(status)
             {
@@ -20,14 +23,14 @@ public class LlmClientTests
             };
             if (status == HttpStatusCode.TooManyRequests)
                 response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.Zero);
-            return Task.FromResult(response);
+            return response;
         }
     }
 
     private static (LlmClient Client, Scripted Engine) Client(params HttpStatusCode[] statuses)
     {
         var engine = new Scripted(statuses);
-        return (new LlmClient(new HttpClient(engine) { BaseAddress = new Uri("http://dataplane/") }, new EnginePriority(false)), engine);
+        return (new LlmClient(new HttpClient(engine) { BaseAddress = new Uri("http://dataplane/") }), engine);
     }
 
     private static readonly RunSpec Spec = new("task", "fake", "interactive", null, 8, null);
@@ -41,6 +44,32 @@ public class LlmClientTests
 
         Assert.Equal("done", reply.Content);
         Assert.Equal(3, engine.Sent);
+    }
+
+    private static readonly JsonArray Tools = [new JsonObject { ["type"] = "function", ["function"] = new JsonObject { ["name"] = "lookup" } }];
+
+    [Fact]
+    public async Task One_tool_call_per_reply_unless_the_run_allows_parallel_calls()
+    {
+        var (client, engine) = Client(HttpStatusCode.OK);
+
+        await client.ChatAsync("run-1", Spec, [], Tools, CancellationToken.None);
+        Assert.False(engine.LastBody?["parallel_tool_calls"]?.GetValue<bool>());
+
+        await client.ChatAsync("run-1", Spec with { ParallelToolCalls = true }, [], Tools, CancellationToken.None);
+        Assert.Null(engine.LastBody?["parallel_tool_calls"]);
+    }
+
+    [Fact]
+    public async Task No_reply_length_is_sent_unless_the_run_sets_one()
+    {
+        var (client, engine) = Client(HttpStatusCode.OK);
+
+        await client.ChatAsync("run-1", Spec, [], [], CancellationToken.None);
+        Assert.Null(engine.LastBody?["max_tokens"]);
+
+        await client.ChatAsync("run-1", Spec with { MaxTokens = 64 }, [], [], CancellationToken.None);
+        Assert.Equal(64, engine.LastBody?["max_tokens"]?.GetValue<int>());
     }
 
     [Fact]

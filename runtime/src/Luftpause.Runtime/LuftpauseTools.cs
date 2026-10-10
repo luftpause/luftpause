@@ -21,10 +21,12 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         [Description("interactive (default) or batch. Batch runs yield to interactive ones.")] string serviceClass = "interactive",
         [Description("Optional system prompt for the sub-agent.")] string? system = null,
         [Description("Tool calls allowed before the sub-agent must answer without tools.")] int maxToolCalls = 8,
-        [Description("Names of the tools this run may use; all configured tools when omitted.")] string[]? tools = null)
+        [Description("Names of the tools this run may use; all configured tools when omitted.")] string[]? tools = null,
+        [Description("Longest reply per model turn, in tokens; 0 leaves it to the engine. Engines that reserve memory per request (SGLang) batch far fewer requests without it.")] int maxTokens = 256,
+        [Description("Let the model ask for several tool calls in one reply, run at once. Off by default: Llama 3.x takes one call per reply.")] bool parallelToolCalls = false)
     {
         var allowed = tools is { Length: > 0 } ? tools.ToHashSet(StringComparer.Ordinal) : null;
-        var record = runs.Spawn(new RunSpec(task, model ?? defaults.Model, serviceClass, system, Math.Clamp(maxToolCalls, 0, 64), allowed));
+        var record = runs.Spawn(new RunSpec(task, model ?? defaults.Model, serviceClass, system, Math.Max(maxToolCalls, 0), allowed, maxTokens > 0 ? maxTokens : null, parallelToolCalls));
         return new { handle = record.Handle };
     }
 

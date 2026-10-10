@@ -4,26 +4,30 @@ namespace Luftpause.Runtime;
 
 public sealed class AgentLoop(LlmClient llm, ToolCatalog tools, TimeProvider time, ILogger<AgentLoop> log)
 {
-    private const int MaxTurns = 16;
-    private const string DefaultSystem =
+    private const string SingleCallSystem =
         "You are a sub-agent. Use the available tools when they help, one call per reply. " +
+        "When you have what you need, answer in a few sentences without calling a tool.";
+    private const string ParallelCallSystem =
+        "You are a sub-agent. Use the available tools when they help; independent calls may go in one reply. " +
         "When you have what you need, answer in a few sentences without calling a tool.";
 
     public async Task<RunOutcome> RunAsync(string runId, RunSpec spec, CancellationToken cancel)
     {
         var definitions = Allowed(await tools.DefinitionsAsync(cancel), spec.Tools);
         var messages = new JsonArray(
-            new JsonObject { ["role"] = "system", ["content"] = spec.System ?? DefaultSystem },
+            new JsonObject { ["role"] = "system", ["content"] = spec.System ?? (spec.ParallelToolCalls ? ParallelCallSystem : SingleCallSystem) },
             new JsonObject { ["role"] = "user", ["content"] = spec.Task });
         var toolCalls = 0;
         var failedToolCalls = 0;
 
-        for (var turn = 1; turn <= MaxTurns; turn++)
+        for (var turn = 1; ; turn++)
         {
             var offered = toolCalls < spec.MaxToolCalls ? definitions : [];
             var reply = await llm.ChatAsync(runId, spec, messages, offered, cancel);
-            var calls = reply.ToolCalls.Count > 0
-                ? reply.ToolCalls.Take(1).ToList()
+            var calls = offered.Count == 0
+                ? []
+                : reply.ToolCalls.Count > 0
+                ? reply.ToolCalls.Take(spec.ParallelToolCalls ? spec.MaxToolCalls - toolCalls : 1).ToList()
                 : TextToolCalls.Recover(reply.Content, offered) is { } recovered ? [Logged(runId, recovered)] : [];
             if (calls.Count == 0)
                 return string.IsNullOrWhiteSpace(reply.Content)
@@ -47,7 +51,6 @@ public sealed class AgentLoop(LlmClient llm, ToolCatalog tools, TimeProvider tim
             toolCalls += calls.Count;
             failedToolCalls += results.Count(r => r.Failed);
         }
-        return new RunOutcome(RunStatus.Failed, null, $"no answer after {MaxTurns} turns", MaxTurns, toolCalls, failedToolCalls);
     }
 
     private JsonObject Logged(string runId, JsonObject recovered)

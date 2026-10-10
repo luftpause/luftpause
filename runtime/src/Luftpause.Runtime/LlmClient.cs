@@ -6,9 +6,8 @@ namespace Luftpause.Runtime;
 
 public sealed record LlmReply(string? Content, IReadOnlyList<JsonObject> ToolCalls, string? FinishReason);
 
-public sealed class LlmClient(HttpClient http, EnginePriority priority)
+public sealed class LlmClient(HttpClient http)
 {
-    private const int MaxTokens = 256;
     private static readonly TimeSpan DefaultRetryAfter = TimeSpan.FromSeconds(1);
 
     public async Task<LlmReply> ChatAsync(
@@ -18,14 +17,14 @@ public sealed class LlmClient(HttpClient http, EnginePriority priority)
         {
             ["model"] = spec.Model,
             ["messages"] = messages.DeepClone(),
-            ["max_tokens"] = MaxTokens,
         };
-        if (priority.ValueFor(spec.ServiceClass) is { } value)
-            body["priority"] = value;
+        if (spec.MaxTokens is { } maxTokens)
+            body["max_tokens"] = maxTokens;
         if (tools.Count > 0)
         {
             body["tools"] = tools.DeepClone();
-            body["parallel_tool_calls"] = false;
+            if (!spec.ParallelToolCalls)
+                body["parallel_tool_calls"] = false;
         }
 
         using var response = await SendAsync(() =>
@@ -69,13 +68,4 @@ public sealed class LlmClient(HttpClient http, EnginePriority priority)
             await Task.Delay(delay, cancel);
         }
     }
-}
-
-public sealed record EnginePriority(bool Send)
-{
-    public const int Interactive = 100;
-    public const int Batch = 0;
-
-    public int? ValueFor(string serviceClass) =>
-        !Send ? null : string.Equals(serviceClass, "batch", StringComparison.OrdinalIgnoreCase) ? Batch : Interactive;
 }

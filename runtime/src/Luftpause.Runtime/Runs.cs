@@ -3,7 +3,7 @@ namespace Luftpause.Runtime;
 public enum RunStatus { Running, Completed, Failed, Cancelled }
 
 public sealed record RunSpec(
-    string Task, string Model, string ServiceClass, string? System, int MaxToolCalls, IReadOnlySet<string>? Tools = null);
+    string Task, string Model, string ServiceClass, string? System, int MaxToolCalls, IReadOnlySet<string>? Tools = null, int? MaxTokens = null, bool ParallelToolCalls = false);
 
 public sealed record RunOutcome(RunStatus Status, string? Answer, string? Error, int Turns, int ToolCalls, int FailedToolCalls = 0);
 
