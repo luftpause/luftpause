@@ -98,10 +98,10 @@ flowchart LR
 
 | Capability | How |
 |---|---|
-| `spawn` / `await` over MCP | `spawn(task, model?, serviceClass?, system?, maxToolCalls?, tools?)` returns a handle at once; `await(handles, all\|any, timeout)` collects results with `toolCalls` / `failedToolCalls`; also `tools`, `status`, `cancel`, `decide` |
-| Tools apart from turns | a run waiting on a tool holds no turn slot; tool calls run in the runtime against MCP servers over HTTP or stdio |
+| `spawn` / `await` over MCP | `spawn(task, model?, serviceClass?, system?, maxToolCalls?, tools?, maxTokens?, parallelToolCalls?)` returns a handle at once; `await(handles, all\|any, timeout)` collects results with `toolCalls` / `failedToolCalls`; also `tools`, `status`, `cancel`, `decide` |
+| Tools apart from turns | a run waiting on a tool holds no turn slot; tool calls run in the runtime against MCP servers over HTTP or stdio; with `spawn(parallelToolCalls: true)` the model may ask for several per reply and they run at once (off by default: Llama 3.x takes one call per reply) |
 | Admission by engine load | turns go to an engine while it reports no waiting queue (SGLang and vLLM `/metrics`); once it queues, luftpause caps its turns at what the engine runs and holds the rest; engines that report no load are not capped |
-| Service classes | batch turns leave room on an engine for each interactive run paused on a tool there, since it will come back; turns held by luftpause go out `interactive` first, then by arrival; 429 after 60 s waiting |
+| Service classes | batch turns leave room on an engine for each interactive run paused on a tool there, since it will come back; turns held by luftpause go out `interactive` first, then by arrival, and wait until placed or until their client disconnects |
 | Routers as backends | a replica can be a router (e.g. the SGLang router) that picks the engine; its load is read from the engines behind it (`LoadFrom`) |
 | Affinity | a run's next turn goes back to the replica that served its last one, where its prompt prefix is cached |
 | Routing by model | endpoints declare the models they serve; a turn only goes to a replica serving its model; an unknown model gets 404 at once |
@@ -110,6 +110,27 @@ flowchart LR
 | Tool-call hygiene | arguments coerced to the schema's scalar types, validated, and rejected with the expected shape instead of a silent bad call; calls written as text are recovered |
 | Run identity | `x-luftpause-run-id`, or the `tool_call_id`s an agent echoes back |
 | Single-pass engines | `POST /v1/decide` (vLLM `/classify` shape) on separate replicas, outside run state |
+
+## Constants
+
+luftpause keeps few fixed numbers. There is no queue deadline and no turn limit: a
+held turn waits as it would in the engine's own queue, and a run ends when its tool
+budget is spent. What is left:
+
+| Constant | Value | What it does | Where |
+|---|---|---|---|
+| Reply length | 256 tokens per turn, set per run with `spawn(maxTokens)`, 0 leaves it to the engine | SGLang reserves memory for the longest reply a request may write; without a limit it batched a seventh as many requests (6 vs 42 runs/min on the test bed) and runaway replies broke Llama's one-call-per-reply format | `runtime/…/LuftpauseTools.cs` |
+| Tool-call budget | 8 per run, set per run with `spawn(maxToolCalls)` | Once spent, the model is offered no tools and must answer; this also bounds a run's turns at budget + 1 | `runtime/…/LuftpauseTools.cs` |
+| `await` timeout | 60 s by default, 600 s at most | How long one `await` call waits before returning the runs' current state; 60 s stays under MCP clients' own per-request limit (Claude Code's is 60 s over HTTP) | `runtime/…/LuftpauseTools.cs` |
+| Turn timeout | 10 min | A turn whose completion is never reported (dataplane crashed mid-turn) is dropped and its slot freed | `scheduler/…/Expiry.cs` |
+| Run idle expiry | 30 min | A run with no turn for this long is forgotten; its next turn starts without affinity. Agents with their own loop never say they are done, so their state needs an end | `scheduler/…/Expiry.cs` |
+| Probe period | 2 s | Engine health and load (`/metrics`) are read this often; admission follows engine load with this delay; also the probe timeout | `scheduler/…/Probing.cs` |
+| Clock tick | 1 s | Drives the two expiries above | `scheduler/…/Clock.cs` |
+| Runtime → dataplane timeout | 10 min | Longest a single turn may take, queue wait included, before the run fails; the same as the OpenAI and Anthropic clients' default | `runtime/…/Program.cs` |
+| 429 retry delay | the response's `Retry-After`, else 1 s | The runtime retries a turn an engine rejects with 429 (a hosted API's rate limit) until the run is cancelled | `runtime/…/LlmClient.cs` |
+| Engine connect timeout | 2 s | The dataplane gives up connecting to an engine after this | `dataplane/…/main.rs` |
+| Report reconnect | 1 s | The dataplane reconnects its event stream to the scheduler after this pause | `dataplane/…/report.rs` |
+| Tool-call id memory | 30 min, pruned every 60 s | How long the dataplane can recognise a run by the `tool_call_id`s its agent echoes back (agents that send no run header) | `dataplane/…/run_identity.rs` |
 
 ## Running it
 
