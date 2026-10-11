@@ -11,7 +11,8 @@ public sealed record SpawnOptions(
     Uri Endpoint, int Concurrency, string ServiceClass, string? Model, int DurationSeconds, int ContextChars, int MaxToolCalls,
     double DeepShare = 0,
     bool Sequential = false,
-    int? MaxTokens = null);
+    int? MaxTokens = null,
+    string? RecordsPath = null);
 
 public static class Orchestrator
 {
@@ -30,6 +31,8 @@ public static class Orchestrator
         var spawned = 0;
         var inFlight = new HashSet<string>();
         var groups = new Dictionary<string, string>();
+        var spawnedAt = new Dictionary<string, double>();
+        var finishedAt = new Dictionary<string, double>();
         var finished = new List<JsonObject>();
 
         async Task Spawn()
@@ -37,12 +40,16 @@ public static class Orchestrator
             var index = spawned++;
             var handle = await SpawnAsync(client, index, options, cancel);
             groups[handle] = Group(index, options.DeepShare);
+            spawnedAt[handle] = wall.Elapsed.TotalSeconds;
             inFlight.Add(handle);
         }
 
         var first = await Task.WhenAll(Enumerable.Range(0, options.Concurrency).Select(i => SpawnAsync(client, i, options, cancel)));
         for (var i = 0; i < first.Length; i++)
+        {
             groups[first[i]] = Group(i, options.DeepShare);
+            spawnedAt[first[i]] = 0;
+        }
         inFlight.UnionWith(first);
         spawned = first.Length;
         while (inFlight.Count > 0)
@@ -57,6 +64,7 @@ public static class Orchestrator
             foreach (var run in done)
             {
                 inFlight.Remove(run["handle"]!.ToString());
+                finishedAt[run["handle"]!.ToString()] = wall.Elapsed.TotalSeconds;
                 finished.Add(run);
                 if (options.DurationSeconds > 0 && wall.Elapsed < deadline)
                     await Spawn();
@@ -65,6 +73,9 @@ public static class Orchestrator
         var window = wall.Elapsed;
         foreach (var handle in inFlight)
             await client.CallToolAsync("cancel", new Dictionary<string, object?> { ["handle"] = handle }, cancellationToken: cancel);
+
+        if (options.RecordsPath is not null)
+            await WriteRecordsAsync(options.RecordsPath, finished, inFlight, spawnedAt, finishedAt, window, cancel);
 
         var report = Summarise(finished, inFlight.Count, window);
         if (options.DeepShare <= 0)
@@ -107,6 +118,34 @@ public static class Orchestrator
             arguments["maxTokens"] = options.MaxTokens;
         var result = await client.CallToolAsync("spawn", arguments, cancellationToken: cancel);
         return Parse(result)?["handle"]?.GetValue<string>() ?? throw new InvalidOperationException($"spawn failed: {Text(result)}");
+    }
+
+    private static async Task WriteRecordsAsync(
+        string path, List<JsonObject> finished, IEnumerable<string> cut,
+        Dictionary<string, double> spawnedAt, Dictionary<string, double> finishedAt, TimeSpan window, CancellationToken cancel)
+    {
+        var records = finished
+            .Select(v => new JsonObject
+            {
+                ["handle"] = v["handle"]?.ToString(),
+                ["status"] = v["status"]?.ToString(),
+                ["error"] = v["error"]?.ToString(),
+                ["turns"] = v["turns"]?.GetValue<int>(),
+                ["toolCalls"] = v["toolCalls"]?.GetValue<int>(),
+                ["failedToolCalls"] = v["failedToolCalls"]?.GetValue<int>(),
+                ["elapsedSeconds"] = v["elapsedSeconds"]?.GetValue<double>(),
+                ["spawnedAtSeconds"] = spawnedAt.GetValueOrDefault(v["handle"]!.ToString()),
+                ["finishedAtSeconds"] = finishedAt.GetValueOrDefault(v["handle"]!.ToString()),
+                ["windowSeconds"] = window.TotalSeconds,
+            })
+            .Concat(cut.Select(h => new JsonObject
+            {
+                ["handle"] = h,
+                ["status"] = "Cut",
+                ["spawnedAtSeconds"] = spawnedAt.GetValueOrDefault(h),
+                ["windowSeconds"] = window.TotalSeconds,
+            }));
+        await File.WriteAllLinesAsync(path, records.Select(r => r.ToJsonString()), cancel);
     }
 
     private static async Task<List<JsonObject>> AwaitAsync(
