@@ -52,6 +52,7 @@ internal sealed record Options(int Agents, string BaseUrl, AgentShape Shape, int
                 double.Parse(Value("--deep-share", "0"), System.Globalization.CultureInfo.InvariantCulture),
                 args.Contains("--sequential"),
                 args.Contains("--max-tokens") ? int.Parse(Value("--max-tokens", "0")) : null,
-                args.Contains("--records") ? Value("--records", "") : null));
+                args.Contains("--records") ? Value("--records", "") : null,
+                args.Contains("--tasks") ? int.Parse(Value("--tasks", "0")) : null));
     }
 }

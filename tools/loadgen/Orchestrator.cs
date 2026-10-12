@@ -12,7 +12,8 @@ public sealed record SpawnOptions(
     double DeepShare = 0,
     bool Sequential = false,
     int? MaxTokens = null,
-    string? RecordsPath = null);
+    string? RecordsPath = null,
+    int? Tasks = null);
 
 public static class Orchestrator
 {
@@ -44,7 +45,8 @@ public static class Orchestrator
             inFlight.Add(handle);
         }
 
-        var first = await Task.WhenAll(Enumerable.Range(0, options.Concurrency).Select(i => SpawnAsync(client, i, options, cancel)));
+        var initial = options.Tasks is { } tasks ? Math.Min(options.Concurrency, tasks) : options.Concurrency;
+        var first = await Task.WhenAll(Enumerable.Range(0, initial).Select(i => SpawnAsync(client, i, options, cancel)));
         for (var i = 0; i < first.Length; i++)
         {
             groups[first[i]] = Group(i, options.DeepShare);
@@ -58,7 +60,8 @@ public static class Orchestrator
             if (remaining <= TimeSpan.Zero)
                 break;
 
-            var done = (await AwaitAsync(client, [.. inFlight], options.DurationSeconds > 0 ? "any" : "all", remaining, cancel))
+            var streaming = options.DurationSeconds > 0 || options.Tasks is not null;
+            var done = (await AwaitAsync(client, [.. inFlight], streaming ? "any" : "all", remaining, cancel))
                 .Where(v => v["status"]?.ToString() != "Running")
                 .ToList();
             foreach (var run in done)
@@ -66,7 +69,7 @@ public static class Orchestrator
                 inFlight.Remove(run["handle"]!.ToString());
                 finishedAt[run["handle"]!.ToString()] = wall.Elapsed.TotalSeconds;
                 finished.Add(run);
-                if (options.DurationSeconds > 0 && wall.Elapsed < deadline)
+                if (options.Tasks is { } total ? spawned < total : options.DurationSeconds > 0 && wall.Elapsed < deadline)
                     await Spawn();
             }
         }
