@@ -12,6 +12,35 @@ Func<int, Task<IReadOnlyList<TurnSample>>> run = options.DecideCalls > 0
     ? i => new DecisionAgent(http, options.Shape, options.DecideCalls).RunAsync(i, CancellationToken.None)
     : i => new Agent(http, options.Shape).RunAsync(i, CancellationToken.None);
 
+if (options.Spawn.DurationSeconds > 0)
+{
+    var deadline = TimeSpan.FromSeconds(options.Spawn.DurationSeconds);
+    var clock = Stopwatch.StartNew();
+    var perWorker = await Task.WhenAll(Enumerable.Range(0, options.Agents).Select(async worker =>
+    {
+        var times = new List<double>();
+        var failed = 0;
+        for (var n = 0; clock.Elapsed < deadline; n++)
+        {
+            var started = clock.Elapsed;
+            var samples = await run(worker * 100_000 + n);
+            var finished = clock.Elapsed;
+            if (finished > deadline)
+                break;
+            if (samples.All(s => s.Status == 200))
+                times.Add((finished - started).TotalSeconds);
+            else
+                failed++;
+        }
+        return (times, failed);
+    }));
+    var all = perWorker.SelectMany(w => w.times).Order().ToArray();
+    Console.WriteLine($"completed {all.Length}  failed {perWorker.Sum(w => w.failed)}  window {deadline.TotalSeconds:F1}s");
+    Console.WriteLine($"throughput {all.Length / deadline.TotalMinutes:F2} runs/min");
+    Console.WriteLine(all.Length == 0 ? "run time n=0" : $"run time p50 {all[all.Length / 2]:F1}s  p90 {all[(int)(all.Length * 0.9)]:F1}s");
+    return;
+}
+
 var wall = Stopwatch.StartNew();
 var runs = await Task.WhenAll(Enumerable.Range(0, options.Agents).Select(run));
 Console.WriteLine(Report.Summarise(runs, wall.Elapsed));
