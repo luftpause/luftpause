@@ -78,6 +78,26 @@ public class LlmClientTests
     }
 
     [Fact]
+    public async Task A_turn_names_its_caller_when_the_run_has_one()
+    {
+        var (client, engine) = Client(HttpStatusCode.OK);
+
+        await client.ChatAsync("run-1", Spec with { Caller = "session-7" }, [], [], CancellationToken.None);
+
+        Assert.Equal(["session-7"], engine.LastRequest!.Headers.GetValues("x-luftpause-caller"));
+    }
+
+    [Fact]
+    public async Task A_turn_without_a_caller_sends_no_caller_header()
+    {
+        var (client, engine) = Client(HttpStatusCode.OK);
+
+        await client.ChatAsync("run-1", Spec, [], [], CancellationToken.None);
+
+        Assert.False(engine.LastRequest!.Headers.Contains("x-luftpause-caller"));
+    }
+
+    [Fact]
     public async Task A_reply_carries_the_engines_token_usage_with_cached_prompt_tokens()
     {
         var engine = new Scripted(HttpStatusCode.OK)

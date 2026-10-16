@@ -17,6 +17,7 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         "Start a sub-agent run on the pooled local models and return its handle immediately. " +
         "The run uses the configured tool servers. Collect the result later with await.")]
     public object Spawn(
+        McpServer server,
         [Description("What the sub-agent should do.")] string task,
         [Description("Model to run on; defaults to the runtime's model.")] string? model = null,
         [Description("interactive (default) or batch. Batch runs yield to interactive ones.")] string serviceClass = "interactive",
@@ -28,7 +29,7 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         [Description("Handle of the run this one belongs to; cancelling the parent cancels it.")] string? parent = null)
     {
         var allowed = tools is { Length: > 0 } ? tools.ToHashSet(StringComparer.Ordinal) : null;
-        var spec = new RunSpec(task, model ?? defaults.Model, serviceClass, system, Math.Max(maxToolCalls, 0), allowed, maxTokens > 0 ? maxTokens : null, parallelToolCalls);
+        var spec = new RunSpec(task, model ?? defaults.Model, serviceClass, system, Math.Max(maxToolCalls, 0), allowed, maxTokens > 0 ? maxTokens : null, parallelToolCalls, server.SessionId);
         try
         {
             return new { handle = runs.Spawn(spec, parent).Handle };
