@@ -11,5 +11,7 @@ RUN apt-get update \
  && /opt/tools/bin/pip install --no-cache-dir wikipedia-mcp==2.0.1
 WORKDIR /app
 ENV ASPNETCORE_HTTP_PORTS=
+ENV Runtime__StateDir=/var/lib/luftpause
+VOLUME /var/lib/luftpause
 COPY --from=build /out .
 ENTRYPOINT ["dotnet", "Luftpause.Runtime.dll"]

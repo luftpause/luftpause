@@ -37,6 +37,7 @@ services:
       Tools__Servers__0__Name: fake-tools
       Tools__Servers__0__Url: http://fake-mcp:9100/mcp
     ports: ["7000:7000"]
+    volumes: [runtime_state:/var/lib/luftpause]
     depends_on: [dataplane, fake-mcp]
 
   fake-mcp:
@@ -50,3 +51,6 @@ services:
   fake-engine-a: *fake-engine
   fake-engine-b: *fake-engine
   fake-classify: *fake-engine
+
+volumes:
+  runtime_state:
