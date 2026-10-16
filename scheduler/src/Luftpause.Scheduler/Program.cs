@@ -2,6 +2,7 @@ using Luftpause.Scheduler;
 using Luftpause.Scheduling;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.Http2.MaxStreamsPerConnection = int.MaxValue);
 
 var topology = builder.Configuration.GetSection("Engines").Get<EngineTopology>() ?? new EngineTopology();
 
