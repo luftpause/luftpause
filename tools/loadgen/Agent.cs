@@ -98,6 +98,8 @@ public sealed class Agent(HttpClient http, AgentShape shape)
         if (shape.SendRunHeader)
             request.Headers.Add(RunIdHeader, runId);
         request.Headers.Add("x-luftpause-class", shape.Service);
+        if (shape.Caller.Length > 0)
+            request.Headers.Add("x-luftpause-caller", shape.Caller);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
 
         var clock = Stopwatch.StartNew();
