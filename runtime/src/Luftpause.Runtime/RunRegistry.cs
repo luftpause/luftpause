@@ -62,7 +62,9 @@ public sealed class RunRegistry(AgentLoop loop, LlmClient llm, TimeProvider time
         await Task.Yield();
         try
         {
-            return await loop.RunAsync(record.Handle, record.Spec, work => record.Work = work, record.Cancel.Token);
+            return await loop.RunAsync(
+                new RunStart(record.Handle, record.Spec, AgentLoop.InitialMessages(record.Spec), RunWork.None),
+                progress => record.Work = progress.Work, record.Cancel.Token);
         }
         catch (OperationCanceledException)
         {
