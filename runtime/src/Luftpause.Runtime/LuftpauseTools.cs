@@ -50,11 +50,12 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         "failedToolCalls counts tool calls that returned an error; when it equals toolCalls, the answer came from the model's own memory, not from tools.")]
     public Task<IReadOnlyList<RunView>> Await(
         [Description("Handles returned by spawn.")] string[] handles,
+        IProgress<ProgressNotificationValue> progress,
         [Description("all (default) or any.")] string mode = "all",
         [Description("Longest time to wait, in seconds.")] int timeoutSeconds = 60,
         CancellationToken cancellationToken = default) =>
         runs.AwaitAsync(handles, !string.Equals(mode, "any", StringComparison.OrdinalIgnoreCase),
-            TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 0, 600)), cancellationToken);
+            TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 0, 600)), new AwaitProgress(progress), cancellationToken);
 
     [McpServerTool(Name = "status", ReadOnly = true), Description("Current state of a run, without waiting.")]
     public object Status([Description("Handle returned by spawn.")] string handle) =>

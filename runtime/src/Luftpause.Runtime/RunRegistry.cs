@@ -51,17 +51,33 @@ public sealed class RunRegistry(
     }
 
     public async Task<IReadOnlyList<RunView>> AwaitAsync(
-        IReadOnlyList<string> handles, bool all, TimeSpan timeout, CancellationToken cancel)
+        IReadOnlyList<string> handles, bool all, TimeSpan timeout, IProgress<RunView> progress, CancellationToken cancel)
     {
         var records = handles.Select(Find).OfType<RunRecord>().ToList();
-        var pending = records.Select(r => r.Completion).Where(t => !t.IsCompleted).ToList();
-        if (pending.Count > 0 && (all || records.All(r => !r.Completion.IsCompleted)))
+        var deadline = Task.Delay(timeout, time, cancel);
+        var reported = records.Select(r => r.Work).ToList();
+        while (true)
         {
-            Task waitFor = all ? Task.WhenAll(pending) : Task.WhenAny(pending);
-            await Task.WhenAny(waitFor, Task.Delay(timeout, time, cancel));
+            var signals = records.Select(r => r.WorkChanged).ToList();
+            reported = Report(records, reported, progress);
+            if (!Waiting(records, all) || deadline.IsCompleted)
+                break;
+            await Task.WhenAny([deadline, .. signals, .. records.Select(r => r.Completion)]);
         }
         var now = time.GetUtcNow();
         return records.Select(r => View(r, now)).ToList();
+    }
+
+    private static bool Waiting(IReadOnlyList<RunRecord> records, bool all) =>
+        records.Any(r => !r.Completion.IsCompleted) && (all || records.All(r => !r.Completion.IsCompleted));
+
+    private List<RunWork> Report(IReadOnlyList<RunRecord> records, IReadOnlyList<RunWork> reported, IProgress<RunView> progress)
+    {
+        var now = time.GetUtcNow();
+        var current = records.Select(r => r.Work).ToList();
+        foreach (var (record, _) in records.Zip(current, reported).Where(r => r.Second != r.Third).Select(r => (r.First, r.Second)))
+            progress.Report(View(record, now));
+        return current;
     }
 
     private void Adopt(RunRecord record)
