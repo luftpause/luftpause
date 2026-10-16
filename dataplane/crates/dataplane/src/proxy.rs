@@ -20,6 +20,9 @@ use crate::turn::{ObservedBody, TurnContext, TurnTimings};
 pub const RUN_ID_HEADER: &str = "x-luftpause-run-id";
 pub const REPLICA_HEADER: &str = "x-luftpause-replica";
 pub const CLASS_HEADER: &str = "x-luftpause-class";
+pub const CALLER_HEADER: &str = "x-luftpause-caller";
+
+const CALLER_MAX_BYTES: usize = 128;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -58,7 +61,7 @@ async fn handle(app: AppState, headers: HeaderMap, body: Bytes, engine_class: En
         resumed: !tool_results.is_empty(),
         service_class: service_class(&headers) as i32,
         request_bytes: body.len() as u32,
-        caller: String::new(),
+        caller: caller(&headers),
     };
     let guard = AdmitGuard::new(app.sink.clone(), ids.clone());
 
@@ -85,6 +88,16 @@ fn service_class(headers: &HeaderMap) -> ServiceClass {
         Some(v) if v.eq_ignore_ascii_case("batch") => ServiceClass::Batch,
         _ => ServiceClass::Interactive,
     }
+}
+
+fn caller(headers: &HeaderMap) -> String {
+    headers
+        .get(CALLER_HEADER)
+        .map(|v| {
+            let bytes = v.as_bytes();
+            String::from_utf8_lossy(&bytes[..bytes.len().min(CALLER_MAX_BYTES)]).into_owned()
+        })
+        .unwrap_or_default()
 }
 
 fn resolve_run(app: &AppState, headers: &HeaderMap, tool_results: &[String]) -> String {
@@ -155,4 +168,37 @@ fn refused(refuse: &Refuse) -> Response {
 
 fn error(status: StatusCode, message: &str) -> Response {
     (status, axum::Json(json!({ "error": { "message": message } }))).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_caller(value: &[u8]) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(CALLER_HEADER, HeaderValue::from_bytes(value).unwrap());
+        headers
+    }
+
+    #[test]
+    fn caller_is_empty_when_absent() {
+        assert_eq!(caller(&HeaderMap::new()), "");
+    }
+
+    #[test]
+    fn caller_is_taken_from_the_header() {
+        assert_eq!(caller(&with_caller(b"session-7")), "session-7");
+    }
+
+    #[test]
+    fn caller_is_cut_at_128_bytes() {
+        assert_eq!(caller(&with_caller(&[b'a'; 200])), "a".repeat(128));
+    }
+
+    #[test]
+    fn caller_cut_inside_a_multibyte_character_is_kept_lossily() {
+        let mut value = vec![b'a'; 127];
+        value.extend_from_slice("é".as_bytes());
+        assert_eq!(caller(&with_caller(&value)), format!("{}\u{FFFD}", "a".repeat(127)));
+    }
 }
