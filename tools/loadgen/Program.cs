@@ -39,7 +39,8 @@ internal sealed record Options(int Agents, string BaseUrl, AgentShape Shape, int
                 Value("--class", "interactive"),
                 args.Contains("--tools-mcp") ? new Uri(Value("--tools-mcp", "")) : null,
                 int.Parse(Value("--think-ms", "0")),
-                args.Contains("--max-tool-calls") ? int.Parse(Value("--max-tool-calls", "3")) : int.MaxValue),
+                args.Contains("--max-tool-calls") ? int.Parse(Value("--max-tool-calls", "3")) : int.MaxValue,
+                Value("--caller", "")),
             int.Parse(Value("--decide-calls", "0")),
             new SpawnOptions(
                 new Uri(Value("--mcp", "http://localhost:7000/mcp")),

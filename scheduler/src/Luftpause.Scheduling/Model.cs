@@ -16,7 +16,7 @@ public sealed record Replica(
     public bool Serves(string model) => Models is not { Length: > 0 } || Models.Contains(model, StringComparer.Ordinal);
 }
 
-public sealed record Turn(string TurnId, string RunId, string ReplicaId, long StartedUnixMs, int KvTokens = 0, int RequestBytes = 0);
+public sealed record Turn(string TurnId, string RunId, string ReplicaId, long StartedUnixMs, int KvTokens = 0, int RequestBytes = 0, string Caller = "");
 
 public sealed record ReplicaUsage(long PromptTokens, long RequestBytes, long CompletionTokens, int Turns)
 {
@@ -38,7 +38,8 @@ public sealed record Run(
     int Turns,
     long LastActivityUnixMs,
     long StartedUnixMs,
-    ServiceClass Service = ServiceClass.Interactive);
+    ServiceClass Service = ServiceClass.Interactive,
+    string Caller = "");
 
 public sealed record SchedulerState(
     ImmutableArray<Replica> Replicas,
@@ -69,6 +70,8 @@ public sealed record SchedulerState(
     }
 
     public int InFlightOn(string replicaId) => InFlight.GetValueOrDefault(replicaId);
+
+    public int InFlightOf(string caller) => Turns.Values.Count(t => t.Caller == caller);
 
     public int InteractivePausedOn(string replicaId) =>
         Runs.Values.Count(r => r is { Service: ServiceClass.Interactive, Phase: AwaitingTool } && r.LastReplicaId == replicaId);
