@@ -4,17 +4,20 @@ using Proto = Luftpause.Protocol.V1;
 
 namespace Luftpause.Scheduler;
 
-public sealed class SchedulerService(Dispatcher dispatcher, AdmissionWaiters waiters, EngineCredentials credentials, TimeProvider time)
+public sealed class SchedulerService(
+    Dispatcher dispatcher, AdmissionWaiters waiters, EngineCredentials credentials, TimeProvider time, ILogger<SchedulerService> log)
     : Proto.Scheduler.SchedulerBase
 {
     public override async Task<Proto.Decision> Admit(Proto.TurnRequest request, ServerCallContext context)
     {
+        var requested = time.GetTimestamp();
         var placed = waiters.Register(request.TurnId);
         dispatcher.Apply(ProtocolMapping.ToEvent(request));
         try
         {
             var action = await placed.WaitAsync(context.CancellationToken);
             context.CancellationToken.ThrowIfCancellationRequested();
+            LogAdmitted(request, action, time.GetElapsedTime(requested));
             return ProtocolMapping.ToDecision(action, credentials);
         }
         catch (OperationCanceledException)
@@ -35,4 +38,9 @@ public sealed class SchedulerService(Dispatcher dispatcher, AdmissionWaiters wai
         }
         return new Proto.ReportAck();
     }
+
+    private void LogAdmitted(Proto.TurnRequest request, SchedulerAction action, TimeSpan waited) =>
+        log.LogInformation(
+            "turn_admitted turn={Turn} run={Run} replica={Replica} waitedMs={WaitedMs}",
+            request.TurnId, request.RunId, action is RouteTurn route ? route.Replica.Id : "refused", (long)waited.TotalMilliseconds);
 }

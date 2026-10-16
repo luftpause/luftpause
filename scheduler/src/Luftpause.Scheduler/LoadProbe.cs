@@ -11,8 +11,6 @@ public sealed class LoadProbe(
     ILogger<LoadProbe> log)
     : BackgroundService
 {
-    private readonly Dictionary<string, string> logged = [];
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var endpoints = topology.Endpoints().ToList();
@@ -29,12 +27,12 @@ public sealed class LoadProbe(
 
     private void Report(string replicaId, EngineLoadSample load)
     {
-        var decision = dispatcher.Apply(new ReplicaLoadReported(replicaId, load.Running, load.Waiting, time.GetUtcNow().ToUnixTimeMilliseconds()));
-        var capacity = decision.State.Capacity.TryGetValue(replicaId, out var c) ? c.ToString() : "open";
-        if (logged.GetValueOrDefault(replicaId) == capacity)
-            return;
-        logged[replicaId] = capacity;
-        log.LogInformation("replica_capacity {Replica} capacity={Capacity} running={Running} waiting={Waiting}", replicaId, capacity, load.Running, load.Waiting);
+        var state = dispatcher.Apply(new ReplicaLoadReported(replicaId, load.Running, load.Waiting, time.GetUtcNow().ToUnixTimeMilliseconds(), load.KvTokens)).State;
+        log.LogInformation(
+            "replica_load {Replica} capacity={Capacity} running={Running} waiting={Waiting} inflight={InFlight} held={Held} activeRuns={ActiveRuns} runsThatFit={RunsThatFit}",
+            replicaId, state.Capacity.TryGetValue(replicaId, out var c) ? c.ToString() : "open",
+            load.Running, load.Waiting, state.InFlightOn(replicaId), state.Waiting.Count,
+            WorkingSet.ActiveRunsOn(state, replicaId), WorkingSet.RunsThatFit(state, replicaId) is var fit and < int.MaxValue ? fit.ToString() : "any");
     }
 
     private async Task<EngineLoadSample?> LoadOfAsync(HttpClient http, EngineEndpoint endpoint, CancellationToken cancel)

@@ -2,16 +2,18 @@ using System.Globalization;
 
 namespace Luftpause.Scheduling;
 
-public sealed record EngineLoadSample(int Running, int Waiting)
+public sealed record EngineLoadSample(int Running, int Waiting, int? KvTokens = null)
 {
     public static EngineLoadSample Sum(IEnumerable<EngineLoadSample> samples) =>
-        samples.Aggregate(new EngineLoadSample(0, 0), (total, s) => new EngineLoadSample(total.Running + s.Running, total.Waiting + s.Waiting));
+        samples.Aggregate(new EngineLoadSample(0, 0, 0), (total, s) =>
+            new EngineLoadSample(total.Running + s.Running, total.Waiting + s.Waiting, total.KvTokens + s.KvTokens));
 }
 
 public static class EngineMetrics
 {
     private static readonly string[] Running = ["sglang:num_running_reqs", "vllm:num_requests_running"];
     private static readonly string[] Waiting = ["sglang:num_queue_reqs", "vllm:num_requests_waiting"];
+    private const string KvTokens = "sglang:max_total_num_tokens";
 
     public static EngineLoadSample? Parse(string text)
     {
@@ -25,9 +27,10 @@ public static class EngineMetrics
 
         var running = samples.Where(s => Running.Contains(s.Name)).ToList();
         var waiting = samples.Where(s => Waiting.Contains(s.Name)).ToList();
+        var kv = samples.Where(s => s.Name == KvTokens).Select(s => (int?)s.Value).Max();
         return running.Count == 0 || waiting.Count == 0
             ? null
-            : new EngineLoadSample((int)running.Sum(s => s.Value), (int)waiting.Sum(s => s.Value));
+            : new EngineLoadSample((int)running.Sum(s => s.Value), (int)waiting.Sum(s => s.Value), kv);
     }
 
     private static bool IsPriorityBreakdown(string line)

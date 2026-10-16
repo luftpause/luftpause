@@ -5,7 +5,7 @@ public static class TurnLifecycle
     public static SchedulerState Start(SchedulerState state, TurnRequested request, Replica replica)
     {
         var run = state.Runs.GetValueOrDefault(request.RunId)
-            ?? new Run(request.RunId, new Idle(request.AtUnixMs), null, 0, request.AtUnixMs);
+            ?? new Run(request.RunId, new Idle(request.AtUnixMs), null, 0, request.AtUnixMs, request.AtUnixMs);
 
         return state with
         {
@@ -62,7 +62,7 @@ public static class TurnLifecycle
         if (!state.Turns.ContainsKey(completed.TurnId))
             return state;
 
-        var released = Release(state, completed.TurnId);
+        var released = WorkingSet.Record(Release(state, completed.TurnId), state.Turns[completed.TurnId].ReplicaId, completed.Usage);
         if (released.Runs.GetValueOrDefault(completed.RunId) is not { Phase: Generating g } run || g.TurnId != completed.TurnId)
             return released;
 

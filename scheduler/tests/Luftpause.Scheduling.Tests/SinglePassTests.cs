@@ -41,8 +41,8 @@ public class SinglePassTests
     [Fact]
     public void Decisions_spread_across_single_pass_replicas_and_queue_when_all_are_full()
     {
-        var decision = Run(SchedulerState.Initial([ClassifierA, ClassifierB]),
-            new ReplicaLoadReported("cls-a", 2, 1, 0), new ReplicaLoadReported("cls-b", 2, 1, 0),
+        var initial = SchedulerState.Initial([ClassifierA, ClassifierB]);
+        var decision = Run(initial with { Capacity = initial.Capacity.SetItem("cls-a", 2).SetItem("cls-b", 2) },
             Decide("d1", "a"), Decide("d2", "b"), Decide("d3", "c"), Decide("d4", "d"), Decide("d5", "e"));
 
         var routed = decision.Actions.OfType<RouteTurn>().ToList();

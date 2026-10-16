@@ -6,7 +6,7 @@ public static class Admission
 {
     public static ImmutableArray<Replica> Candidates(SchedulerState state, TurnRequested request) =>
         state.ReplicasOf(request.Class)
-            .Where(r => r.Serves(request.Model) && state.IsHealthy(r) && HasRoom(state, r, request.Service))
+            .Where(r => r.Serves(request.Model) && state.IsHealthy(r) && HasRoom(state, r, request.Service) && WorkingSet.Admits(state, r, request))
             .ToImmutableArray();
 
     public static bool HasRoom(SchedulerState state, Replica replica, ServiceClass service) =>

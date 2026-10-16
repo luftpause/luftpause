@@ -34,6 +34,6 @@ public sealed record TurnAbandoned(string TurnId, string RunId, long AtUnixMs)
 
 public sealed record ReplicaHealthChanged(string ReplicaId, bool Healthy, long AtUnixMs) : SchedulerEvent(AtUnixMs);
 
-public sealed record ReplicaLoadReported(string ReplicaId, int Running, int Waiting, long AtUnixMs) : SchedulerEvent(AtUnixMs);
+public sealed record ReplicaLoadReported(string ReplicaId, int Running, int Waiting, long AtUnixMs, int? KvTokens = null) : SchedulerEvent(AtUnixMs);
 
 public sealed record Tick(long AtUnixMs) : SchedulerEvent(AtUnixMs);

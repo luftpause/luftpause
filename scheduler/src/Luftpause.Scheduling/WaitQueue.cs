@@ -8,6 +8,7 @@ public static class WaitQueue
     public static Decision Drain(SchedulerState state, Func<SchedulerState, TurnRequested, Decision?> place) =>
         state.Waiting
             .OrderBy(w => w.Service == ServiceClass.Interactive ? 0 : 1)
+            .ThenBy(w => state.Runs.TryGetValue(w.RunId, out var run) ? run.StartedUnixMs : w.AtUnixMs)
             .ThenBy(w => w.AtUnixMs)
             .Aggregate(Decision.Unchanged(state), (decision, waiting) =>
             {

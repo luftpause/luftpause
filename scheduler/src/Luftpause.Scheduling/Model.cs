@@ -32,6 +32,7 @@ public sealed record Run(
     string? LastReplicaId,
     int Turns,
     long LastActivityUnixMs,
+    long StartedUnixMs,
     ServiceClass Service = ServiceClass.Interactive);
 
 public sealed record SchedulerState(
@@ -42,7 +43,9 @@ public sealed record SchedulerState(
     long Routed,
     ImmutableList<TurnRequested> Waiting,
     ImmutableHashSet<string> Unhealthy,
-    ImmutableDictionary<string, int> Capacity)
+    ImmutableDictionary<string, int> Capacity,
+    ImmutableDictionary<string, int> KvPool,
+    ImmutableDictionary<string, int> PeakRunTokens)
 {
     public static SchedulerState Initial(IEnumerable<Replica> replicas)
     {
@@ -55,6 +58,8 @@ public sealed record SchedulerState(
             0,
             ImmutableList<TurnRequested>.Empty,
             ImmutableHashSet<string>.Empty,
+            ImmutableDictionary<string, int>.Empty,
+            ImmutableDictionary<string, int>.Empty,
             ImmutableDictionary<string, int>.Empty);
     }
 
