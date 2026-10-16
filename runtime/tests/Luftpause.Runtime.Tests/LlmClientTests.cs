@@ -9,6 +9,8 @@ public class LlmClientTests
     {
         private int sent;
 
+        public string Reply { get; init; } = """{"choices":[{"message":{"content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":1}}""";
+
         public int Sent => sent;
 
         public JsonNode? LastBody { get; private set; }
@@ -19,7 +21,7 @@ public class LlmClientTests
             var status = statuses[Math.Min(sent++, statuses.Length - 1)];
             var response = new HttpResponseMessage(status)
             {
-                Content = new StringContent("""{"choices":[{"message":{"content":"done"},"finish_reason":"stop"}]}"""),
+                Content = new StringContent(Reply),
             };
             if (status == HttpStatusCode.TooManyRequests)
                 response.Headers.RetryAfter = new System.Net.Http.Headers.RetryConditionHeaderValue(TimeSpan.Zero);
@@ -70,6 +72,39 @@ public class LlmClientTests
 
         await client.ChatAsync("run-1", Spec with { MaxTokens = 64 }, [], [], CancellationToken.None);
         Assert.Equal(64, engine.LastBody?["max_tokens"]?.GetValue<int>());
+    }
+
+    [Fact]
+    public async Task A_reply_carries_the_engines_token_usage_with_cached_prompt_tokens()
+    {
+        var engine = new Scripted(HttpStatusCode.OK)
+        {
+            Reply = """{"choices":[{"message":{"content":"done"},"finish_reason":"stop"}],"usage":{"prompt_tokens":120,"completion_tokens":9,"prompt_tokens_details":{"cached_tokens":100}}}""",
+        };
+        var client = new LlmClient(new HttpClient(engine) { BaseAddress = new Uri("http://dataplane/") });
+
+        var reply = await client.ChatAsync("run-1", Spec, [], [], CancellationToken.None);
+
+        Assert.Equal(new TokenUsage(120, 100, 9), reply.Usage);
+    }
+
+    [Fact]
+    public async Task A_reply_without_cached_token_details_leaves_cached_tokens_unknown()
+    {
+        var (client, _) = Client(HttpStatusCode.OK);
+
+        var reply = await client.ChatAsync("run-1", Spec, [], [], CancellationToken.None);
+
+        Assert.Equal(new TokenUsage(3, null, 1), reply.Usage);
+    }
+
+    [Fact]
+    public async Task A_reply_without_usage_fails_the_turn()
+    {
+        var engine = new Scripted(HttpStatusCode.OK) { Reply = """{"choices":[{"message":{"content":"done"},"finish_reason":"stop"}]}""" };
+        var client = new LlmClient(new HttpClient(engine) { BaseAddress = new Uri("http://dataplane/") });
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => client.ChatAsync("run-1", Spec, [], [], CancellationToken.None));
     }
 
     [Fact]

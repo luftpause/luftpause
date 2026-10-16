@@ -43,16 +43,16 @@ public sealed class RunRegistry(AgentLoop loop, TimeProvider time, ILogger<RunRe
         await Task.Yield();
         try
         {
-            return await loop.RunAsync(record.Handle, record.Spec, record.Cancel.Token);
+            return await loop.RunAsync(record.Handle, record.Spec, work => record.Work = work, record.Cancel.Token);
         }
         catch (OperationCanceledException)
         {
-            return new RunOutcome(RunStatus.Cancelled, null, "cancelled", 0, 0);
+            return new RunOutcome(RunStatus.Cancelled, null, "cancelled");
         }
         catch (Exception e)
         {
             log.LogWarning(e, "Run {Handle} failed", record.Handle);
-            return new RunOutcome(RunStatus.Failed, null, e.Message, 0, 0);
+            return new RunOutcome(RunStatus.Failed, null, e.Message);
         }
         finally
         {

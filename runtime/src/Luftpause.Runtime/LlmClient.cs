@@ -4,7 +4,7 @@ using System.Text.Json.Nodes;
 
 namespace Luftpause.Runtime;
 
-public sealed record LlmReply(string? Content, IReadOnlyList<JsonObject> ToolCalls, string? FinishReason);
+public sealed record LlmReply(string? Content, IReadOnlyList<JsonObject> ToolCalls, string? FinishReason, TokenUsage Usage);
 
 public sealed class LlmClient(HttpClient http)
 {
@@ -38,11 +38,23 @@ public sealed class LlmClient(HttpClient http)
         if (!response.IsSuccessStatusCode)
             throw new HttpRequestException($"chat turn failed: {(int)response.StatusCode} {text[..Math.Min(text.Length, 300)]}");
 
-        var choice = JsonNode.Parse(text)?["choices"]?[0];
+        var root = JsonNode.Parse(text);
+        var choice = root?["choices"]?[0];
         var message = choice?["message"];
         var calls = message?["tool_calls"]?.AsArray().OfType<JsonObject>().ToList() ?? [];
-        return new LlmReply(message?["content"]?.GetValue<string>(), calls, choice?["finish_reason"]?.GetValue<string>());
+        return new LlmReply(message?["content"]?.GetValue<string>(), calls, choice?["finish_reason"]?.GetValue<string>(), Usage(root?["usage"]));
     }
+
+    private static TokenUsage Usage(JsonNode? usage) =>
+        usage is null
+            ? throw new InvalidOperationException("chat turn reply has no usage")
+            : new TokenUsage(
+                Count(usage, "prompt_tokens"),
+                usage["prompt_tokens_details"]?["cached_tokens"]?.GetValue<int>(),
+                Count(usage, "completion_tokens"));
+
+    private static int Count(JsonNode usage, string field) =>
+        usage[field]?.GetValue<int>() ?? throw new InvalidOperationException($"chat turn usage has no {field}");
 
     public async Task<string> DecideAsync(string model, string input, CancellationToken cancel)
     {

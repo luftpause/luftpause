@@ -28,6 +28,7 @@ public static class Orchestrator
             return await RunSequentialAsync(client, options, cancel);
 
         var wall = Stopwatch.StartNew();
+        var startedUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var deadline = TimeSpan.FromSeconds(options.DurationSeconds);
         var spawned = 0;
         var inFlight = new HashSet<string>();
@@ -74,11 +75,12 @@ public static class Orchestrator
             }
         }
         var window = wall.Elapsed;
+        var cut = await AwaitAsync(client, [.. inFlight], "all", TimeSpan.Zero, cancel);
         foreach (var handle in inFlight)
             await client.CallToolAsync("cancel", new Dictionary<string, object?> { ["handle"] = handle }, cancellationToken: cancel);
 
         if (options.RecordsPath is not null)
-            await WriteRecordsAsync(options.RecordsPath, finished, inFlight, spawnedAt, finishedAt, window, cancel);
+            await WriteRecordsAsync(options.RecordsPath, finished, cut, spawnedAt, finishedAt, window, startedUnixMs, cancel);
 
         var report = Summarise(finished, inFlight.Count, window);
         if (options.DeepShare <= 0)
@@ -123,33 +125,41 @@ public static class Orchestrator
         return Parse(result)?["handle"]?.GetValue<string>() ?? throw new InvalidOperationException($"spawn failed: {Text(result)}");
     }
 
+    private static readonly string[] WorkFields =
+        ["turns", "toolCalls", "failedToolCalls", "elapsedSeconds", "promptTokens", "completionTokens", "turnSeconds", "toolSeconds"];
+
+    private static readonly string[] OmittedWhenNull = ["error", "cachedTokens"];
+
     private static async Task WriteRecordsAsync(
-        string path, List<JsonObject> finished, IEnumerable<string> cut,
-        Dictionary<string, double> spawnedAt, Dictionary<string, double> finishedAt, TimeSpan window, CancellationToken cancel)
+        string path, List<JsonObject> finished, List<JsonObject> cut,
+        Dictionary<string, double> spawnedAt, Dictionary<string, double> finishedAt, TimeSpan window, long startedUnixMs, CancellationToken cancel)
     {
-        var records = finished
-            .Select(v => new JsonObject
+        JsonObject Record(JsonObject view, string status)
+        {
+            var handle = Field(view, "handle")!.GetValue<string>();
+            var record = new JsonObject
             {
-                ["handle"] = v["handle"]?.ToString(),
-                ["status"] = v["status"]?.ToString(),
-                ["error"] = v["error"]?.ToString(),
-                ["turns"] = v["turns"]?.GetValue<int>(),
-                ["toolCalls"] = v["toolCalls"]?.GetValue<int>(),
-                ["failedToolCalls"] = v["failedToolCalls"]?.GetValue<int>(),
-                ["elapsedSeconds"] = v["elapsedSeconds"]?.GetValue<double>(),
-                ["spawnedAtSeconds"] = spawnedAt.GetValueOrDefault(v["handle"]!.ToString()),
-                ["finishedAtSeconds"] = finishedAt.GetValueOrDefault(v["handle"]!.ToString()),
+                ["handle"] = handle,
+                ["status"] = status,
+                ["spawnedAtSeconds"] = spawnedAt[handle],
+                ["finishedAtSeconds"] = finishedAt.TryGetValue(handle, out var at) ? at : null,
                 ["windowSeconds"] = window.TotalSeconds,
-            })
-            .Concat(cut.Select(h => new JsonObject
-            {
-                ["handle"] = h,
-                ["status"] = "Cut",
-                ["spawnedAtSeconds"] = spawnedAt.GetValueOrDefault(h),
-                ["windowSeconds"] = window.TotalSeconds,
-            }));
+                ["windowStartedUnixMs"] = startedUnixMs,
+            };
+            foreach (var field in WorkFields)
+                record[field] = Field(view, field)!.DeepClone();
+            foreach (var field in OmittedWhenNull)
+                record[field] = view[field]?.DeepClone();
+            return record;
+        }
+
+        var records = finished.Select(v => Record(v, Field(v, "status")!.GetValue<string>()))
+            .Concat(cut.Select(v => Record(v, "Cut")));
         await File.WriteAllLinesAsync(path, records.Select(r => r.ToJsonString()), cancel);
     }
+
+    private static JsonNode? Field(JsonObject view, string name) =>
+        view.TryGetPropertyValue(name, out var value) ? value : throw new InvalidOperationException($"run view has no {name}: {view.ToJsonString()}");
 
     private static async Task<List<JsonObject>> AwaitAsync(
         McpClient client, string[] handles, string mode, TimeSpan timeout, CancellationToken cancel)

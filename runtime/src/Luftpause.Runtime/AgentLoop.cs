@@ -11,28 +11,32 @@ public sealed class AgentLoop(LlmClient llm, ToolCatalog tools, TimeProvider tim
         "You are a sub-agent. Use the available tools when they help; independent calls may go in one reply. " +
         "When you have what you need, answer in a few sentences without calling a tool.";
 
-    public async Task<RunOutcome> RunAsync(string runId, RunSpec spec, CancellationToken cancel)
+    public async Task<RunOutcome> RunAsync(string runId, RunSpec spec, Action<RunWork> report, CancellationToken cancel)
     {
         var definitions = Allowed(await tools.DefinitionsAsync(cancel), spec.Tools);
         var messages = new JsonArray(
             new JsonObject { ["role"] = "system", ["content"] = spec.System ?? (spec.ParallelToolCalls ? ParallelCallSystem : SingleCallSystem) },
             new JsonObject { ["role"] = "user", ["content"] = spec.Task });
-        var toolCalls = 0;
-        var failedToolCalls = 0;
+        var work = RunWork.None;
 
-        for (var turn = 1; ; turn++)
+        while (true)
         {
-            var offered = toolCalls < spec.MaxToolCalls ? definitions : [];
+            var offered = work.ToolCalls < spec.MaxToolCalls ? definitions : [];
+            var turnStarted = time.GetTimestamp();
             var reply = await llm.ChatAsync(runId, spec, messages, offered, cancel);
+            var took = time.GetElapsedTime(turnStarted);
+            work = work.AfterTurn(reply.Usage, took);
+            report(work);
+            LogTurn(runId, work.Turns, reply, took);
             var calls = offered.Count == 0
                 ? []
                 : reply.ToolCalls.Count > 0
-                ? reply.ToolCalls.Take(spec.ParallelToolCalls ? spec.MaxToolCalls - toolCalls : 1).ToList()
+                ? reply.ToolCalls.Take(spec.ParallelToolCalls ? spec.MaxToolCalls - work.ToolCalls : 1).ToList()
                 : TextToolCalls.Recover(reply.Content, offered) is { } recovered ? [Logged(runId, recovered)] : [];
             if (calls.Count == 0)
                 return string.IsNullOrWhiteSpace(reply.Content)
-                    ? new RunOutcome(RunStatus.Failed, null, "empty answer", turn, toolCalls, failedToolCalls)
-                    : new RunOutcome(RunStatus.Completed, reply.Content, null, turn, toolCalls, failedToolCalls);
+                    ? new RunOutcome(RunStatus.Failed, null, "empty answer")
+                    : new RunOutcome(RunStatus.Completed, reply.Content, null);
 
             messages.Add(new JsonObject
             {
@@ -40,6 +44,7 @@ public sealed class AgentLoop(LlmClient llm, ToolCatalog tools, TimeProvider tim
                 ["content"] = null,
                 ["tool_calls"] = new JsonArray([.. calls.Select(c => (JsonNode)c.DeepClone())]),
             });
+            var toolsStarted = time.GetTimestamp();
             var results = await Task.WhenAll(calls.Select(c => CallReportedAsync(runId, c, cancel)));
             foreach (var (call, result) in calls.Zip(results))
                 messages.Add(new JsonObject
@@ -48,10 +53,15 @@ public sealed class AgentLoop(LlmClient llm, ToolCatalog tools, TimeProvider tim
                     ["tool_call_id"] = call["id"]?.GetValue<string>(),
                     ["content"] = result.Text,
                 });
-            toolCalls += calls.Count;
-            failedToolCalls += results.Count(r => r.Failed);
+            work = work.AfterTools(calls.Count, results.Count(r => r.Failed), time.GetElapsedTime(toolsStarted));
+            report(work);
         }
     }
+
+    private void LogTurn(string runId, int turn, LlmReply reply, TimeSpan took) =>
+        log.LogInformation(
+            "turn run={Run} turn={Turn} ms={Ms} prompt={Prompt} cached={Cached} completion={Completion} finish={Finish}",
+            runId, turn, (long)took.TotalMilliseconds, reply.Usage.Prompt, reply.Usage.Cached, reply.Usage.Completion, reply.FinishReason);
 
     private JsonObject Logged(string runId, JsonObject recovered)
     {
