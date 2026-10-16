@@ -15,9 +15,12 @@ public class LlmClientTests
 
         public JsonNode? LastBody { get; private set; }
 
+        public HttpRequestMessage? LastRequest { get; private set; }
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
         {
-            LastBody = JsonNode.Parse(await request.Content!.ReadAsStringAsync(cancel));
+            LastRequest = request;
+            LastBody = request.Content is null ? null : JsonNode.Parse(await request.Content.ReadAsStringAsync(cancel));
             var status = statuses[Math.Min(sent++, statuses.Length - 1)];
             var response = new HttpResponseMessage(status)
             {
@@ -105,6 +108,17 @@ public class LlmClientTests
         var client = new LlmClient(new HttpClient(engine) { BaseAddress = new Uri("http://dataplane/") });
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => client.ChatAsync("run-1", Spec, [], [], CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Ending_a_run_tells_the_data_plane_to_forget_it()
+    {
+        var (client, engine) = Client(HttpStatusCode.NoContent);
+
+        await client.EndRunAsync("run-1", CancellationToken.None);
+
+        Assert.Equal(HttpMethod.Delete, engine.LastRequest?.Method);
+        Assert.Equal("/v1/runs/run-1", engine.LastRequest?.RequestUri?.AbsolutePath);
     }
 
     [Fact]

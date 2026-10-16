@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 
 namespace Luftpause.Runtime;
 
-public sealed class RunRegistry(AgentLoop loop, TimeProvider time, ILogger<RunRegistry> log)
+public sealed class RunRegistry(AgentLoop loop, LlmClient llm, TimeProvider time, ILogger<RunRegistry> log)
 {
     private readonly ConcurrentDictionary<string, RunRecord> runs = new();
 
@@ -39,6 +39,25 @@ public sealed class RunRegistry(AgentLoop loop, TimeProvider time, ILogger<RunRe
     }
 
     private async Task<RunOutcome> ExecuteAsync(RunRecord record)
+    {
+        var outcome = await OutcomeAsync(record);
+        await EndAsync(record.Handle);
+        return outcome;
+    }
+
+    private async Task EndAsync(string handle)
+    {
+        try
+        {
+            await llm.EndRunAsync(handle, CancellationToken.None);
+        }
+        catch (HttpRequestException e)
+        {
+            log.LogWarning(e, "Run {Handle} ended but the data plane was not told", handle);
+        }
+    }
+
+    private async Task<RunOutcome> OutcomeAsync(RunRecord record)
     {
         await Task.Yield();
         try

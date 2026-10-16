@@ -16,7 +16,12 @@ public sealed record Replica(
     public bool Serves(string model) => Models is not { Length: > 0 } || Models.Contains(model, StringComparer.Ordinal);
 }
 
-public sealed record Turn(string TurnId, string RunId, string ReplicaId, long StartedUnixMs);
+public sealed record Turn(string TurnId, string RunId, string ReplicaId, long StartedUnixMs, int KvTokens = 0, int RequestBytes = 0);
+
+public sealed record ReplicaUsage(long PromptTokens, long RequestBytes, long CompletionTokens, int Turns)
+{
+    public static readonly ReplicaUsage None = new(0, 0, 0, 0);
+}
 
 public abstract record RunPhase;
 
@@ -45,7 +50,7 @@ public sealed record SchedulerState(
     ImmutableHashSet<string> Unhealthy,
     ImmutableDictionary<string, int> Capacity,
     ImmutableDictionary<string, int> KvPool,
-    ImmutableDictionary<string, int> PeakRunTokens)
+    ImmutableDictionary<string, ReplicaUsage> Usage)
 {
     public static SchedulerState Initial(IEnumerable<Replica> replicas)
     {
@@ -60,7 +65,7 @@ public sealed record SchedulerState(
             ImmutableHashSet<string>.Empty,
             ImmutableDictionary<string, int>.Empty,
             ImmutableDictionary<string, int>.Empty,
-            ImmutableDictionary<string, int>.Empty);
+            ImmutableDictionary<string, ReplicaUsage>.Empty);
     }
 
     public int InFlightOn(string replicaId) => InFlight.GetValueOrDefault(replicaId);

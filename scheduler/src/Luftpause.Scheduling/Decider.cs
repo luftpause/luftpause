@@ -8,6 +8,7 @@ public sealed class Decider(IRoutingPolicy routing)
         TurnCompleted completed => Drain(TurnLifecycle.Complete(state, completed)),
         TurnAbandoned abandoned => Drain(TurnLifecycle.Abandon(state, abandoned)),
         ReplicaHealthChanged health => Drain(Health.Apply(state, health)),
+        RunEnded ended => Drain(state with { Runs = state.Runs.Remove(ended.RunId) }),
         ReplicaLoadReported load => Drain(EngineLoad.Apply(state, load)),
         Tick tick => Drain(Expiry.Apply(state, tick)),
         _ => Decision.Unchanged(state),

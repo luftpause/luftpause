@@ -11,7 +11,8 @@ public sealed record TurnRequested(
     string Model,
     bool Resumed,
     long AtUnixMs,
-    ServiceClass Service = ServiceClass.Interactive)
+    ServiceClass Service = ServiceClass.Interactive,
+    int RequestBytes = 0)
     : TurnEvent(TurnId, RunId, AtUnixMs);
 
 public sealed record TurnStarted(string TurnId, string RunId, string ReplicaId, long AtUnixMs)
@@ -31,6 +32,8 @@ public sealed record TurnCompleted(
 
 public sealed record TurnAbandoned(string TurnId, string RunId, long AtUnixMs)
     : TurnEvent(TurnId, RunId, AtUnixMs);
+
+public sealed record RunEnded(string RunId, long AtUnixMs) : SchedulerEvent(AtUnixMs);
 
 public sealed record ReplicaHealthChanged(string ReplicaId, bool Healthy, long AtUnixMs) : SchedulerEvent(AtUnixMs);
 

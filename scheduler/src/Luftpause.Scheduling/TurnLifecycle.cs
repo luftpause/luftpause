@@ -10,7 +10,7 @@ public static class TurnLifecycle
         return state with
         {
             InFlight = state.InFlight.SetItem(replica.Id, state.InFlightOn(replica.Id) + 1),
-            Turns = state.Turns.SetItem(request.TurnId, new Turn(request.TurnId, request.RunId, replica.Id, request.AtUnixMs)),
+            Turns = state.Turns.SetItem(request.TurnId, KvBudget.Turn(state, request, replica)),
             Runs = state.Runs.SetItem(request.RunId, run with
             {
                 Phase = new Generating(request.TurnId),
@@ -27,7 +27,7 @@ public static class TurnLifecycle
         state with
         {
             InFlight = state.InFlight.SetItem(replica.Id, state.InFlightOn(replica.Id) + 1),
-            Turns = state.Turns.SetItem(request.TurnId, new Turn(request.TurnId, request.RunId, replica.Id, request.AtUnixMs)),
+            Turns = state.Turns.SetItem(request.TurnId, KvBudget.Turn(state, request, replica)),
             Routed = state.Routed + 1,
         };
 
@@ -62,7 +62,7 @@ public static class TurnLifecycle
         if (!state.Turns.ContainsKey(completed.TurnId))
             return state;
 
-        var released = WorkingSet.Record(Release(state, completed.TurnId), state.Turns[completed.TurnId].ReplicaId, completed.Usage);
+        var released = KvBudget.Record(Release(state, completed.TurnId), state.Turns[completed.TurnId], completed.Usage);
         if (released.Runs.GetValueOrDefault(completed.RunId) is not { Phase: Generating g } run || g.TurnId != completed.TurnId)
             return released;
 

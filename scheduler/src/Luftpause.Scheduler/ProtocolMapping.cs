@@ -12,7 +12,8 @@ public static class ProtocolMapping
         request.Model,
         request.Resumed,
         request.AtUnixMs,
-        request.ServiceClass == Proto.ServiceClass.Batch ? ServiceClass.Batch : ServiceClass.Interactive);
+        request.ServiceClass == Proto.ServiceClass.Batch ? ServiceClass.Batch : ServiceClass.Interactive,
+        (int)request.RequestBytes);
 
     public static SchedulerEvent? ToEvent(Proto.TurnEvent e) => e.KindCase switch
     {
@@ -25,6 +26,7 @@ public static class ProtocolMapping
             new TokenUsage((int)e.Completed.PromptTokens, (int)e.Completed.CompletionTokens, (int)e.Completed.CachedTokens),
             e.Completed.Failed,
             e.AtUnixMs),
+        Proto.TurnEvent.KindOneofCase.RunEnded => new RunEnded(e.RunId, e.AtUnixMs),
         _ => null,
     };
 

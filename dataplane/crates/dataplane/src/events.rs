@@ -3,7 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::observe::Outcome;
-use crate::proto::{FirstToken, TurnCompleted, TurnEvent, TurnStarted, turn_event::Kind};
+use crate::proto::{FirstToken, RunEnded, TurnCompleted, TurnEvent, TurnStarted, turn_event::Kind};
 
 #[derive(Clone)]
 pub struct EventSink(UnboundedSender<TurnEvent>);
@@ -38,6 +38,10 @@ impl EventSink {
                 failed,
             }),
         );
+    }
+
+    pub fn run_ended(&self, run_id: &str) {
+        self.emit(&TurnIds { turn_id: String::new(), run_id: run_id.to_owned() }, Kind::RunEnded(RunEnded {}));
     }
 
     fn emit(&self, ids: &TurnIds, kind: Kind) {

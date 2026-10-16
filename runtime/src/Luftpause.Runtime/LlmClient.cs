@@ -56,6 +56,11 @@ public sealed class LlmClient(HttpClient http)
     private static int Count(JsonNode usage, string field) =>
         usage[field]?.GetValue<int>() ?? throw new InvalidOperationException($"chat turn usage has no {field}");
 
+    public async Task EndRunAsync(string runId, CancellationToken cancel)
+    {
+        using var response = await http.DeleteAsync($"v1/runs/{Uri.EscapeDataString(runId)}", cancel);
+    }
+
     public async Task<string> DecideAsync(string model, string input, CancellationToken cancel)
     {
         using var response = await SendAsync(

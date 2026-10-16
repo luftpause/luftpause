@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::routing::post;
+use axum::routing::{delete, post};
 use tokio::sync::mpsc;
 use tonic::transport::Endpoint;
 
@@ -44,6 +44,7 @@ async fn main() {
     let router = Router::new()
         .route("/v1/chat/completions", post(proxy::chat_completions))
         .route("/v1/decide", post(proxy::decide))
+        .route("/v1/runs/{run_id}", delete(proxy::end_run))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(&listen).await.expect("bind");

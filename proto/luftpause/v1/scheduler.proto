@@ -30,6 +30,7 @@ message TurnRequest {
   int64 at_unix_ms = 6;
   bool resumed = 7;
   ServiceClass service_class = 8;
+  uint32 request_bytes = 9;
 }
 
 message Decision {
@@ -60,6 +61,7 @@ message TurnEvent {
     TurnStarted started = 4;
     FirstToken first_token = 5;
     TurnCompleted completed = 6;
+    RunEnded run_ended = 7;
   }
 }
 
@@ -76,6 +78,8 @@ message TurnCompleted {
   uint32 cached_tokens = 4;
   bool failed = 5;
 }
+
+message RunEnded {}
 
 message ReportAck {}
 

@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use axum::body::{Body, Bytes};
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use serde_json::{Value, json};
@@ -37,6 +37,11 @@ pub async fn decide(State(app): State<AppState>, headers: HeaderMap, body: Bytes
     handle(app, headers, body, EngineClass::SinglePass).await
 }
 
+pub async fn end_run(State(app): State<AppState>, Path(run_id): Path<String>) -> StatusCode {
+    app.sink.run_ended(&run_id);
+    StatusCode::NO_CONTENT
+}
+
 async fn handle(app: AppState, headers: HeaderMap, body: Bytes, engine_class: EngineClass) -> Response {
     let received = Instant::now();
     let Ok(request) = serde_json::from_slice::<Value>(&body) else {
@@ -52,6 +57,7 @@ async fn handle(app: AppState, headers: HeaderMap, body: Bytes, engine_class: En
         at_unix_ms: now_unix_ms(),
         resumed: !tool_results.is_empty(),
         service_class: service_class(&headers) as i32,
+        request_bytes: body.len() as u32,
     };
     let guard = AdmitGuard::new(app.sink.clone(), ids.clone());
 

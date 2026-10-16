@@ -29,10 +29,11 @@ public sealed class LoadProbe(
     {
         var state = dispatcher.Apply(new ReplicaLoadReported(replicaId, load.Running, load.Waiting, time.GetUtcNow().ToUnixTimeMilliseconds(), load.KvTokens)).State;
         log.LogInformation(
-            "replica_load {Replica} capacity={Capacity} running={Running} waiting={Waiting} inflight={InFlight} held={Held} activeRuns={ActiveRuns} runsThatFit={RunsThatFit}",
+            "replica_load {Replica} capacity={Capacity} running={Running} waiting={Waiting} inflight={InFlight} held={Held} activeRuns={ActiveRuns} kvInFlight={KvInFlight} kvPool={KvPool}",
             replicaId, state.Capacity.TryGetValue(replicaId, out var c) ? c.ToString() : "open",
             load.Running, load.Waiting, state.InFlightOn(replicaId), state.Waiting.Count,
-            WorkingSet.ActiveRunsOn(state, replicaId), WorkingSet.RunsThatFit(state, replicaId) is var fit and < int.MaxValue ? fit.ToString() : "any");
+            WorkingSet.ActiveRunsOn(state, replicaId), KvBudget.InFlightTokens(state, replicaId),
+            state.KvPool.TryGetValue(replicaId, out var pool) ? pool.ToString() : "unknown");
     }
 
     private async Task<EngineLoadSample?> LoadOfAsync(HttpClient http, EngineEndpoint endpoint, CancellationToken cancel)
