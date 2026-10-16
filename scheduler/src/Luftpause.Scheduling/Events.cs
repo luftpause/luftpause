@@ -12,7 +12,8 @@ public sealed record TurnRequested(
     bool Resumed,
     long AtUnixMs,
     ServiceClass Service = ServiceClass.Interactive,
-    int RequestBytes = 0)
+    int RequestBytes = 0,
+    string Caller = "")
     : TurnEvent(TurnId, RunId, AtUnixMs);
 
 public sealed record TurnStarted(string TurnId, string RunId, string ReplicaId, long AtUnixMs)

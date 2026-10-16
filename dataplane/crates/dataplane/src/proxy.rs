@@ -58,6 +58,7 @@ async fn handle(app: AppState, headers: HeaderMap, body: Bytes, engine_class: En
         resumed: !tool_results.is_empty(),
         service_class: service_class(&headers) as i32,
         request_bytes: body.len() as u32,
+        caller: String::new(),
     };
     let guard = AdmitGuard::new(app.sink.clone(), ids.clone());
 
