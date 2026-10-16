@@ -1,3 +1,5 @@
+using System.Text.Json.Nodes;
+
 namespace Luftpause.Runtime;
 
 public enum RunStatus { Running, Completed, Failed, Cancelled }
@@ -8,14 +10,16 @@ public sealed record RunSpec(
 public sealed record RunOutcome(RunStatus Status, string? Answer, string? Error);
 
 public sealed record RunView(
-    string Handle, RunStatus Status, string? Answer, string? Error, int Turns, int ToolCalls, int FailedToolCalls, double ElapsedSeconds,
+    string Handle, string? Parent, RunStatus Status, string? Answer, string? Error, int Turns, int ToolCalls, int FailedToolCalls, double ElapsedSeconds,
     long PromptTokens, long? CachedTokens, long CompletionTokens, double TurnSeconds, double ToolSeconds);
 
-public sealed class RunRecord(string handle, RunSpec spec, DateTimeOffset started, CancellationTokenSource cancel)
+public sealed class RunRecord(string handle, RunSpec spec, DateTimeOffset started, CancellationTokenSource cancel, string? parent = null)
 {
     private volatile RunWork work = RunWork.None;
+    private volatile IReadOnlyList<JsonObject> messages = AgentLoop.InitialMessages(spec);
 
     public string Handle { get; } = handle;
+    public string? Parent { get; } = parent;
     public RunSpec Spec { get; } = spec;
     public DateTimeOffset Started { get; } = started;
     public CancellationTokenSource Cancel { get; } = cancel;
@@ -28,11 +32,17 @@ public sealed class RunRecord(string handle, RunSpec spec, DateTimeOffset starte
         set => work = value;
     }
 
+    public IReadOnlyList<JsonObject> Messages
+    {
+        get => messages;
+        set => messages = value;
+    }
+
     public RunView View(DateTimeOffset now)
     {
         var outcome = Completion.IsCompleted ? Completion.Result : new RunOutcome(RunStatus.Running, null, null);
         var done = work;
-        return new RunView(Handle, outcome.Status, outcome.Answer, outcome.Error, done.Turns, done.ToolCalls, done.FailedToolCalls,
+        return new RunView(Handle, Parent, outcome.Status, outcome.Answer, outcome.Error, done.Turns, done.ToolCalls, done.FailedToolCalls,
             ((Finished ?? now) - Started).TotalSeconds,
             done.PromptTokens, done.CachedTokens, done.CompletionTokens, done.TurnSeconds, done.ToolSeconds);
     }

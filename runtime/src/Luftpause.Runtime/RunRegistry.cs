@@ -2,16 +2,31 @@ using System.Collections.Concurrent;
 
 namespace Luftpause.Runtime;
 
-public sealed class RunRegistry(AgentLoop loop, LlmClient llm, TimeProvider time, ILogger<RunRegistry> log)
+public sealed class RunRegistry(
+    IRunLoop loop, RunJournal journal, IReadOnlyList<JournalRecord> history, LlmClient llm, TimeProvider time, ILogger<RunRegistry> log)
 {
     private readonly ConcurrentDictionary<string, RunRecord> runs = new();
 
-    public RunRecord Spawn(RunSpec spec)
+    public RunRecord Spawn(RunSpec spec, string? parent = null)
     {
-        var record = new RunRecord($"run-{Guid.NewGuid():N}", spec, time.GetUtcNow(), new CancellationTokenSource());
-        runs[record.Handle] = record;
-        record.Completion = ExecuteAsync(record);
+        if (parent is not null && !runs.ContainsKey(parent))
+            throw new InvalidOperationException($"unknown parent handle '{parent}'");
+        var record = new RunRecord($"run-{Guid.NewGuid():N}", spec, time.GetUtcNow(), new CancellationTokenSource(), parent);
+        journal.Append(new RunSpawned(record.Handle, spec, record.Started, parent));
+        Start(record);
         return record;
+    }
+
+    public void ResumeAll()
+    {
+        foreach (var replayed in ReplayedRun.From(history))
+        {
+            var record = replayed.Record();
+            if (replayed.Finished is null)
+                Start(record);
+            else
+                runs[record.Handle] = record;
+        }
     }
 
     public RunRecord? Find(string handle) => runs.GetValueOrDefault(handle);
@@ -38,11 +53,29 @@ public sealed class RunRegistry(AgentLoop loop, LlmClient llm, TimeProvider time
         return records.Select(r => r.View(now)).ToList();
     }
 
+    private void Start(RunRecord record)
+    {
+        runs[record.Handle] = record;
+        record.Completion = ExecuteAsync(record);
+    }
+
     private async Task<RunOutcome> ExecuteAsync(RunRecord record)
     {
         var outcome = await OutcomeAsync(record);
+        var finishedAt = time.GetUtcNow();
+        record.Finished = finishedAt;
+        journal.Append(new RunFinished(record.Handle, outcome, finishedAt));
         await EndAsync(record.Handle);
         return outcome;
+    }
+
+    private void Progress(RunRecord record, RunProgress progress)
+    {
+        record.Work = progress.Work;
+        if (progress.NewMessages.Count == 0)
+            return;
+        journal.Append(new RunTurned(record.Handle, progress.NewMessages, progress.Work));
+        record.Messages = [.. record.Messages, .. progress.NewMessages];
     }
 
     private async Task EndAsync(string handle)
@@ -63,8 +96,8 @@ public sealed class RunRegistry(AgentLoop loop, LlmClient llm, TimeProvider time
         try
         {
             return await loop.RunAsync(
-                new RunStart(record.Handle, record.Spec, AgentLoop.InitialMessages(record.Spec), RunWork.None),
-                progress => record.Work = progress.Work, record.Cancel.Token);
+                new RunStart(record.Handle, record.Spec, record.Messages, record.Work),
+                progress => Progress(record, progress), record.Cancel.Token);
         }
         catch (OperationCanceledException)
         {
@@ -74,10 +107,6 @@ public sealed class RunRegistry(AgentLoop loop, LlmClient llm, TimeProvider time
         {
             log.LogWarning(e, "Run {Handle} failed", record.Handle);
             return new RunOutcome(RunStatus.Failed, null, e.Message);
-        }
-        finally
-        {
-            record.Finished = time.GetUtcNow();
         }
     }
 }

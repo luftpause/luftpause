@@ -17,6 +17,35 @@ public sealed record RunTurned(string Handle, IReadOnlyList<JsonObject> NewMessa
 
 public sealed record RunFinished(string Handle, RunOutcome Outcome, DateTimeOffset FinishedAt) : JournalRecord(Handle);
 
+public sealed record ReplayedRun(RunSpawned Spawned, IReadOnlyList<RunTurned> Turns, RunFinished? Finished)
+{
+    public static IReadOnlyList<ReplayedRun> From(IReadOnlyList<JournalRecord> history)
+    {
+        var spawned = history.OfType<RunSpawned>().ToList();
+        var known = spawned.Select(s => s.Handle).ToHashSet(StringComparer.Ordinal);
+        if (history.FirstOrDefault(r => !known.Contains(r.Handle)) is { } orphan)
+            throw new InvalidOperationException($"journal has a {orphan.GetType().Name} for unspawned run '{orphan.Handle}'");
+        var turns = history.OfType<RunTurned>().ToLookup(t => t.Handle, StringComparer.Ordinal);
+        var finished = history.OfType<RunFinished>().ToDictionary(f => f.Handle, StringComparer.Ordinal);
+        return [.. spawned.Select(s => new ReplayedRun(s, [.. turns[s.Handle]], finished.GetValueOrDefault(s.Handle)))];
+    }
+
+    public RunRecord Record()
+    {
+        var record = new RunRecord(Spawned.Handle, Spawned.Spec, Spawned.StartedAt, new CancellationTokenSource(), Spawned.Parent)
+        {
+            Messages = [.. AgentLoop.InitialMessages(Spawned.Spec), .. Turns.SelectMany(t => t.NewMessages)],
+            Work = Turns.Count > 0 ? Turns[^1].Work : RunWork.None,
+        };
+        if (Finished is not null)
+        {
+            record.Completion = Task.FromResult(Finished.Outcome);
+            record.Finished = Finished.FinishedAt;
+        }
+        return record;
+    }
+}
+
 public sealed class RunJournal : IDisposable
 {
     private static readonly JsonSerializerOptions Options = new() { Converters = { new JsonStringEnumConverter(), new ReadOnlySetConverter() } };
