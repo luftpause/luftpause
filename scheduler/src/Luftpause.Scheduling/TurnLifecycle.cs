@@ -5,7 +5,7 @@ public static class TurnLifecycle
     public static SchedulerState Start(SchedulerState state, TurnRequested request, Replica replica)
     {
         var run = state.Runs.GetValueOrDefault(request.RunId)
-            ?? new Run(request.RunId, new Idle(request.AtUnixMs), null, 0, request.AtUnixMs, request.AtUnixMs);
+            ?? new Run(request.RunId, new Idle(request.AtUnixMs), null, 0, request.AtUnixMs, request.AtUnixMs, Caller: request.Caller);
 
         return state with
         {

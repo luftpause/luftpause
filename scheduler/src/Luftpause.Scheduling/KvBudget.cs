@@ -5,7 +5,7 @@ public static class KvBudget
     public const double DefaultTokensPerByte = 0.25;
 
     public static Turn Turn(SchedulerState state, TurnRequested request, Replica replica) =>
-        new(request.TurnId, request.RunId, replica.Id, request.AtUnixMs, Need(state, replica.Id, request.RequestBytes), request.RequestBytes);
+        new(request.TurnId, request.RunId, replica.Id, request.AtUnixMs, Need(state, replica.Id, request.RequestBytes), request.RequestBytes, request.Caller);
 
     public static bool Fits(SchedulerState state, Replica replica, TurnRequested request) =>
         state.InFlightOn(replica.Id) == 0
