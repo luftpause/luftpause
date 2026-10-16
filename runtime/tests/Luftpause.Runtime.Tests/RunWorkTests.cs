@@ -43,7 +43,7 @@ public class RunWorkTests
             Work = RunWork.None.AfterTurn(new TokenUsage(120, 100, 9), TimeSpan.FromSeconds(1)).AfterTools(1, 0, TimeSpan.FromSeconds(2)),
         };
 
-        var view = record.View(DateTimeOffset.UnixEpoch.AddSeconds(5));
+        var view = record.View(DateTimeOffset.UnixEpoch.AddSeconds(5), []);
 
         Assert.Equal((RunStatus.Cancelled, 1, 1, 120L, 100L), (view.Status, view.Turns, view.ToolCalls, view.PromptTokens, view.CachedTokens));
     }

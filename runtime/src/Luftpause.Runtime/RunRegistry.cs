@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections.Immutable;
 
 namespace Luftpause.Runtime;
 
@@ -6,6 +7,7 @@ public sealed class RunRegistry(
     IRunLoop loop, RunJournal journal, IReadOnlyList<JournalRecord> history, LlmClient llm, TimeProvider time, ILogger<RunRegistry> log)
 {
     private readonly ConcurrentDictionary<string, RunRecord> runs = new();
+    private readonly ConcurrentDictionary<string, ImmutableList<string>> children = new();
 
     public RunRecord Spawn(RunSpec spec, string? parent = null)
     {
@@ -13,6 +15,7 @@ public sealed class RunRegistry(
             throw new InvalidOperationException($"unknown parent handle '{parent}'");
         var record = new RunRecord($"run-{Guid.NewGuid():N}", spec, time.GetUtcNow(), new CancellationTokenSource(), parent);
         journal.Append(new RunSpawned(record.Handle, spec, record.Started, parent));
+        Adopt(record);
         Start(record);
         return record;
     }
@@ -22,6 +25,7 @@ public sealed class RunRegistry(
         foreach (var replayed in ReplayedRun.From(history))
         {
             var record = replayed.Record();
+            Adopt(record);
             if (replayed.Finished is null)
                 Start(record);
             else
@@ -31,10 +35,17 @@ public sealed class RunRegistry(
 
     public RunRecord? Find(string handle) => runs.GetValueOrDefault(handle);
 
+    public IReadOnlyList<string> Children(string handle) => children.GetValueOrDefault(handle, []);
+
+    public RunView View(RunRecord record, DateTimeOffset now) => record.View(now, Children(record.Handle));
+
     public bool Cancel(string handle)
     {
-        if (!runs.TryGetValue(handle, out var record) || record.Completion.IsCompleted)
+        if (!runs.TryGetValue(handle, out var record))
             return false;
+        var childCancelled = Children(handle).Select(Cancel).Count(cancelled => cancelled) > 0;
+        if (record.Completion.IsCompleted)
+            return childCancelled;
         record.Cancel.Cancel();
         return true;
     }
@@ -50,7 +61,13 @@ public sealed class RunRegistry(
             await Task.WhenAny(waitFor, Task.Delay(timeout, time, cancel));
         }
         var now = time.GetUtcNow();
-        return records.Select(r => r.View(now)).ToList();
+        return records.Select(r => View(r, now)).ToList();
+    }
+
+    private void Adopt(RunRecord record)
+    {
+        if (record.Parent is { } parent)
+            children.AddOrUpdate(parent, _ => [record.Handle], (_, siblings) => siblings.Add(record.Handle));
     }
 
     private void Start(RunRecord record)

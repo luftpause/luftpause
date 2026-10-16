@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using ModelContextProtocol;
 using ModelContextProtocol.Server;
 
 namespace Luftpause.Runtime;
@@ -23,11 +24,19 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         [Description("Tool calls allowed before the sub-agent must answer without tools.")] int maxToolCalls = 8,
         [Description("Names of the tools this run may use; all configured tools when omitted.")] string[]? tools = null,
         [Description("Longest reply per model turn, in tokens; 0 leaves it to the engine. Engines that reserve memory per request (SGLang) batch far fewer requests without it.")] int maxTokens = 256,
-        [Description("Let the model ask for several tool calls in one reply, run at once. Off by default: Llama 3.x takes one call per reply.")] bool parallelToolCalls = false)
+        [Description("Let the model ask for several tool calls in one reply, run at once. Off by default: Llama 3.x takes one call per reply.")] bool parallelToolCalls = false,
+        [Description("Handle of the run this one belongs to; cancelling the parent cancels it.")] string? parent = null)
     {
         var allowed = tools is { Length: > 0 } ? tools.ToHashSet(StringComparer.Ordinal) : null;
-        var record = runs.Spawn(new RunSpec(task, model ?? defaults.Model, serviceClass, system, Math.Max(maxToolCalls, 0), allowed, maxTokens > 0 ? maxTokens : null, parallelToolCalls));
-        return new { handle = record.Handle };
+        var spec = new RunSpec(task, model ?? defaults.Model, serviceClass, system, Math.Max(maxToolCalls, 0), allowed, maxTokens > 0 ? maxTokens : null, parallelToolCalls);
+        try
+        {
+            return new { handle = runs.Spawn(spec, parent).Handle };
+        }
+        catch (InvalidOperationException e)
+        {
+            throw new McpException(e.Message);
+        }
     }
 
     [McpServerTool(Name = "tools", ReadOnly = true), Description(
@@ -48,9 +57,9 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
 
     [McpServerTool(Name = "status", ReadOnly = true), Description("Current state of a run, without waiting.")]
     public object Status([Description("Handle returned by spawn.")] string handle) =>
-        (object?)runs.Find(handle)?.View(time.GetUtcNow()) ?? new { handle, error = "unknown handle" };
+        runs.Find(handle) is { } record ? runs.View(record, time.GetUtcNow()) : (object)new { handle, error = "unknown handle" };
 
-    [McpServerTool(Name = "cancel"), Description("Cancel a run that is still in progress.")]
+    [McpServerTool(Name = "cancel"), Description("Cancel a run that is still in progress, and every run spawned under it.")]
     public object Cancel([Description("Handle returned by spawn.")] string handle) =>
         new { handle, cancelled = runs.Cancel(handle) };
 

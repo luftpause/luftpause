@@ -10,7 +10,7 @@ public sealed record RunSpec(
 public sealed record RunOutcome(RunStatus Status, string? Answer, string? Error);
 
 public sealed record RunView(
-    string Handle, string? Parent, RunStatus Status, string? Answer, string? Error, int Turns, int ToolCalls, int FailedToolCalls, double ElapsedSeconds,
+    string Handle, string? Parent, IReadOnlyList<string> Children, RunStatus Status, string? Answer, string? Error, int Turns, int ToolCalls, int FailedToolCalls, double ElapsedSeconds,
     long PromptTokens, long? CachedTokens, long CompletionTokens, double TurnSeconds, double ToolSeconds);
 
 public sealed class RunRecord(string handle, RunSpec spec, DateTimeOffset started, CancellationTokenSource cancel, string? parent = null)
@@ -38,11 +38,11 @@ public sealed class RunRecord(string handle, RunSpec spec, DateTimeOffset starte
         set => messages = value;
     }
 
-    public RunView View(DateTimeOffset now)
+    public RunView View(DateTimeOffset now, IReadOnlyList<string> children)
     {
         var outcome = Completion.IsCompleted ? Completion.Result : new RunOutcome(RunStatus.Running, null, null);
         var done = work;
-        return new RunView(Handle, Parent, outcome.Status, outcome.Answer, outcome.Error, done.Turns, done.ToolCalls, done.FailedToolCalls,
+        return new RunView(Handle, Parent, children, outcome.Status, outcome.Answer, outcome.Error, done.Turns, done.ToolCalls, done.FailedToolCalls,
             ((Finished ?? now) - Started).TotalSeconds,
             done.PromptTokens, done.CachedTokens, done.CompletionTokens, done.TurnSeconds, done.ToolSeconds);
     }

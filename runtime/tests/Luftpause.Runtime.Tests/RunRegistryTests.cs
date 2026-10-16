@@ -87,7 +87,7 @@ public sealed class RunRegistryTests : IDisposable
         Assert.Equal("run-1", start.RunId);
         Assert.Equal(AgentLoop.InitialMessages(Spec).Count + 2, start.Messages.Count);
         Assert.Equal(1, start.Work.Turns);
-        Assert.Equal(RunStatus.Running, registry.Find("run-1")!.View(DateTimeOffset.UtcNow).Status);
+        Assert.Equal(RunStatus.Running, registry.Find("run-1")!.View(DateTimeOffset.UtcNow, []).Status);
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public sealed class RunRegistryTests : IDisposable
 
         registry.ResumeAll();
 
-        var view = registry.Find("run-1")!.View(DateTimeOffset.UtcNow);
+        var view = registry.Find("run-1")!.View(DateTimeOffset.UtcNow, []);
         Assert.Equal(("answer", 2.0), (view.Answer, view.ElapsedSeconds));
         Assert.Empty(loop.Starts);
     }
@@ -125,6 +125,67 @@ public sealed class RunRegistryTests : IDisposable
 
         Assert.Equal("unknown parent handle 'run-missing'", error.Message);
         Assert.Empty(loop.Starts);
+    }
+
+    [Fact]
+    public void Children_are_listed_in_spawn_order()
+    {
+        var registry = Registry();
+        var parent = registry.Spawn(Spec);
+
+        var first = registry.Spawn(Spec, parent.Handle);
+        var second = registry.Spawn(Spec, parent.Handle);
+
+        Assert.Equal([first.Handle, second.Handle], registry.Children(parent.Handle));
+        Assert.Empty(registry.Children(first.Handle));
+    }
+
+    [Fact]
+    public void Resumed_runs_keep_their_children()
+    {
+        var registry = Registry(
+            new RunSpawned("run-1", Spec, DateTimeOffset.UnixEpoch, null),
+            new RunSpawned("run-2", Spec, DateTimeOffset.UnixEpoch, "run-1"),
+            new RunSpawned("run-3", Spec, DateTimeOffset.UnixEpoch, "run-1"));
+
+        registry.ResumeAll();
+
+        Assert.Equal(["run-2", "run-3"], registry.Children("run-1"));
+        Assert.Equal("run-1", registry.Find("run-2")!.View(DateTimeOffset.UtcNow, []).Parent);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_parent_cancels_running_children_and_leaves_finished_ones()
+    {
+        var finishes = Spec with { Task = "finishes" };
+        var defaultRun = loop.Run;
+        loop.Run = (start, report, cancel) => start.Spec.Task == "finishes"
+            ? Task.FromResult(new RunOutcome(RunStatus.Completed, "done", null))
+            : defaultRun(start, report, cancel);
+        var registry = Registry();
+        var parent = registry.Spawn(Spec);
+        var finished = registry.Spawn(finishes, parent.Handle);
+        var running = registry.Spawn(Spec, parent.Handle);
+        await finished.Completion;
+
+        Assert.True(registry.Cancel(parent.Handle));
+
+        Assert.True(running.Cancel.IsCancellationRequested);
+        Assert.True(parent.Cancel.IsCancellationRequested);
+        Assert.False(finished.Cancel.IsCancellationRequested);
+        Assert.Equal("done", (await finished.Completion).Answer);
+    }
+
+    [Fact]
+    public async Task Cancelling_a_finished_parent_with_no_running_children_returns_false()
+    {
+        loop.Run = (_, _, _) => Task.FromResult(new RunOutcome(RunStatus.Completed, "done", null));
+        var registry = Registry();
+        var parent = registry.Spawn(Spec);
+        var child = registry.Spawn(Spec, parent.Handle);
+        await Task.WhenAll(parent.Completion, child.Completion);
+
+        Assert.False(registry.Cancel(parent.Handle));
     }
 
     private RunStart SingleStart()
