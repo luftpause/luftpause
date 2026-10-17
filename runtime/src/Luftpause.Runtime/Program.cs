@@ -10,6 +10,7 @@ var defaults = builder.Configuration.GetSection("Runtime").Get<RuntimeDefaults>(
 var stateDir = builder.Configuration["Runtime:StateDir"] ?? "state";
 Directory.CreateDirectory(stateDir);
 var journalPath = Path.Combine(stateDir, "runs.jsonl");
+var token = BearerAuth.Token(builder.Configuration);
 
 builder.Services.AddLuftpauseTracing(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
@@ -18,6 +19,8 @@ builder.Services.AddHttpClient<LlmClient>(http =>
 {
     http.BaseAddress = new Uri(dataPlane.EndsWith('/') ? dataPlane : dataPlane + "/");
     http.Timeout = TimeSpan.FromMinutes(10);
+    if (token is not null)
+        BearerAuth.Authorize(http, token);
 });
 builder.Services.AddSingleton(sp => new ToolCatalog(servers, sp.GetRequiredService<ILoggerFactory>()));
 builder.Services.AddSingleton<IRunLoop, AgentLoop>();
@@ -31,8 +34,9 @@ builder.Services.ConfigureHttpJsonOptions(json => json.SerializerOptions.Convert
 var app = builder.Build();
 app.Services.GetRequiredService<RunRegistry>().ResumeAll();
 
-app.UseClientCapabilityLog(app.Logger);
 app.UseCors();
+app.UseBearerAuth(token, app.Logger);
+app.UseClientCapabilityLog(app.Logger);
 app.MapMcp("/mcp");
 app.MapGet("/status", (RunRegistry runs, TimeProvider time) =>
     {
