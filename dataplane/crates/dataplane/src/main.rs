@@ -1,4 +1,6 @@
 mod events;
+#[cfg(test)]
+mod failure_tests;
 mod observe;
 mod proxy;
 mod report;
@@ -13,8 +15,6 @@ use std::env;
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::Router;
-use axum::routing::{delete, post};
 use tokio::sync::mpsc;
 use tonic::transport::Endpoint;
 
@@ -41,11 +41,7 @@ async fn main() {
         sink: EventSink::new(events_tx),
         runs: Arc::new(run_identity::RunIndex::new()),
     };
-    let router = Router::new()
-        .route("/v1/chat/completions", post(proxy::chat_completions))
-        .route("/v1/decide", post(proxy::decide))
-        .route("/v1/runs/{run_id}", delete(proxy::end_run))
-        .with_state(state);
+    let router = proxy::router(state);
 
     let listener = tokio::net::TcpListener::bind(&listen).await.expect("bind");
     eprintln!("dataplane listening on {listen}, scheduler {scheduler_url}");
