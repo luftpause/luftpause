@@ -1,25 +1,31 @@
 # luftpause
 
-**async/await for LLM agents. Nothing blocks, so the GPUs never wait on a tool.**
+**The runtime layer under your agent harness. Every tool call is an `await`; the
+engine forgets the run, luftpause keeps it.**
 
-An agent spends most of its life waiting — on a tool, on a sub-agent, on a slow
-API. In most stacks that wait holds something: a GPU slot, a thread, the caller.
-luftpause turns every wait into an `await`:
+Tool calls split an agent into turns. To an inference engine each turn is a new
+request from nobody: when the tool returns, the continuation queues behind every
+batch request that arrived while it waited, and its KV cache may be gone.
+luftpause sits between the harness and the engines and keeps the run:
 
-- **A run waiting on a tool holds no GPU slot.** The next ready turn takes it.
-- **A caller that spawns sub-agents keeps working.** `spawn` returns a handle at
-  once; `await` collects results when the caller wants them.
-- **The pool is scheduled per turn, not per agent.** Interactive turns go ahead of
-  batch turns; each run returns to the replica that holds its context.
+- **Continuations go first.** A run paused on a tool call resumes ahead of batch
+  work; batch turns leave room for the interactive runs that will come back.
+- **Turns fit the KV pool.** Each turn is admitted against the memory the engine
+  reports, with the run's own prefix still on the replica that served it.
+- **One caller cannot starve another.** Held turns drain fairly across callers.
+- **Any harness, two doors.** Point `base_url` at it (OpenAI-compatible, your own
+  loop), or connect over MCP and get `spawn` / `await` sub-agents that survive a
+  restart.
 
-Measured on one 8 GB laptop GPU:
+Measured on one 8 GB laptop GPU, engines saturated (48 batch runs flooding,
+4 interactive runs beside them):
 
-| | Result |
-|---|---|
-| Fan-out, 16 sub-agents | **5.3× throughput** — 23 s instead of 120 s one at a time |
-| Interactive agents under a batch flood | **2.4× throughput**, p50 16 s instead of 34 s; total throughput unchanged |
-| Same flood vs SGLang's own priority scheduling | **+46 %** interactive throughput (14.2 vs 9.7 runs/min) |
-| Claude Code as the client | spawns and awaits on its own, unprompted; 70B sub-agents finished in one round with no failed tool calls |
+| | Interactive throughput | Interactive run time p50 | Batch throughput |
+|---|---|---|---|
+| Agents with their own loop, through luftpause vs straight to the SGLang router | **1.9×** (11.9 vs 6.4 runs/min) | 19 s instead of 36 s | −8 % |
+| Sub-agents over MCP, luftpause vs the runtime straight to the router | **2.1×** (6.5 vs 3.0 runs/min) | 32 s instead of 58 s | unchanged |
+| Fan-out, 16 sub-agents, vs one at a time | **5.3×** (23 s instead of 120 s) | | |
+| Claude Code as the client | spawns and awaits on its own, unprompted; 70B sub-agents finished in one round with no failed tool calls | | |
 
 ## Try it
 
@@ -35,13 +41,15 @@ OpenAI-compatible endpoint (`compose.runpod.yaml` shows a hosted vLLM pod).
 
 ## How it differs
 
-MCP servers that delegate a sub-task to a local model exist; routers that place
-requests on a GPU pool exist. luftpause sits between them: it owns the agent loop,
-so it sees each turn and each tool call, and schedules the turns of every run on
-one shared pool.
+Routers place requests on a GPU pool; MCP servers delegate a sub-task to a local
+model. Neither knows what a run is. luftpause does: it sees every turn and every
+tool call of every run, through either door, and schedules them on one shared pool
+with three facts an engine never has: that a paused run will come back, what class
+of work it is, and who is asking.
 
-The gains come from not blocking, not from routing: routing alone already matches
-SGLang's cache-aware router (below).
+The gains come from admission, not from routing. Routing alone ties SGLang's
+cache-aware router (below); with the engines idle, every arm ties. The difference
+appears when the engines are saturated, which is when it matters.
 
 ## Two ways in
 
@@ -98,10 +106,14 @@ flowchart LR
 
 | Capability | How |
 |---|---|
-| `spawn` / `await` over MCP | `spawn(task, model?, serviceClass?, system?, maxToolCalls?, tools?, maxTokens?, parallelToolCalls?)` returns a handle at once; `await(handles, all\|any, timeout)` collects results with `toolCalls` / `failedToolCalls`; also `tools`, `status`, `cancel`, `decide` |
+| `spawn` / `await` over MCP | `spawn(task, model?, serviceClass?, system?, maxToolCalls?, tools?, maxTokens?, parallelToolCalls?, parent?)` returns a handle at once; `await(handles, all\|any, timeout)` collects results with `toolCalls` / `failedToolCalls`; also `tools`, `status`, `cancel`, `decide` |
+| Durable runs | every run is journaled (`runs.jsonl` under `Runtime:StateDir`): spawned, each tool round's messages, finished; on restart the runtime replays the journal, answers `await` for finished runs and resumes unfinished ones from their last complete tool round |
+| Run tree | `spawn(parent)` makes a run a child; `status` lists `parent` and `children`; `cancel` of a parent cancels its running descendants |
+| Caller fairness | each turn carries `x-luftpause-caller` (the MCP session for sub-agents, any string for own-loop agents); held turns drain `interactive` first, then the caller with the fewest turns in flight, so one caller's flood cannot starve another's |
 | Tools apart from turns | a run waiting on a tool holds no turn slot; tool calls run in the runtime against MCP servers over HTTP or stdio; with `spawn(parallelToolCalls: true)` the model may ask for several per reply and they run at once (off by default: Llama 3.x takes one call per reply) |
-| Admission by engine load | turns go to an engine while it reports no waiting queue (SGLang and vLLM `/metrics`); once it queues, luftpause caps its turns at what the engine runs and holds the rest; engines that report no load are not capped |
-| Service classes | batch turns leave room on an engine for each interactive run paused on a tool there, since it will come back; turns held by luftpause go out `interactive` first, then by arrival, and wait until placed or until their client disconnects |
+| Admission by KV memory | an engine that reports its KV pool (SGLang `max_total_num_tokens`) takes a turn while the tokens in flight plus this turn's need fit the pool; the need is estimated from the request's bytes with the tokens-per-byte and reply length observed on that replica; a run that is generating or paused on a tool keeps its replica, so its prefix stays cached |
+| Admission by engine load | an engine that reports no KV pool (vLLM) takes turns while it reports no waiting queue (`/metrics`); once it queues, luftpause caps its turns at what the engine runs and holds the rest; engines that report no load are not capped |
+| Service classes | batch turns leave room on an engine for each interactive run paused on a tool there, since it will come back; turns held by luftpause go out `interactive` first, then by caller fairness, then by arrival, and wait until placed or until their client disconnects |
 | Routers as backends | a replica can be a router (e.g. the SGLang router) that picks the engine; its load is read from the engines behind it (`LoadFrom`) |
 | Affinity | a run's next turn goes back to the replica that served its last one, where its prompt prefix is cached |
 | Routing by model | endpoints declare the models they serve; a turn only goes to a replica serving its model; an unknown model gets 404 at once |
@@ -131,12 +143,16 @@ budget is spent. What is left:
 | Engine connect timeout | 2 s | The dataplane gives up connecting to an engine after this | `dataplane/…/main.rs` |
 | Report reconnect | 1 s | The dataplane reconnects its event stream to the scheduler after this pause | `dataplane/…/report.rs` |
 | Tool-call id memory | 30 min, pruned every 60 s | How long the dataplane can recognise a run by the `tool_call_id`s its agent echoes back (agents that send no run header) | `dataplane/…/run_identity.rs` |
+| Run journal | `Runtime:StateDir`, default `state`, `/var/lib/luftpause` in the container | Where `runs.jsonl` lives; the only state the runtime keeps between restarts | `runtime/…/Program.cs` |
+| Caller header | `x-luftpause-caller`, cut at 128 bytes | Identifies the caller for fairness; absent means one shared anonymous caller | `dataplane/…/proxy.rs` |
+| KV estimate | 0.25 tokens per request byte until a replica has served a turn | Starting guess for a turn's KV need; replaced by the ratio observed on that replica | `scheduler/…/KvBudget.cs` |
 
 ## Running it
 
 ```bash
 docker compose up -d --build                     # scheduler, dataplane, runtime, fake engines, fake MCP tools
 dotnet run --project tools/loadgen -- --spawn 10 # fan 10 sub-agents out over MCP and await them
+dotnet run --project tools/loadgen -- --agents 8 --duration-s 60 --class batch --caller me # 8 own-loop agents through the proxy, closed loop
 ```
 
 On one GPU, two SGLang replicas of Llama-3.2-1B FP8 (the test bed used below):
@@ -170,22 +186,36 @@ noise.
 Per sub-agent, fan-out and router take the same time (p50 15–22 s); the 1.4 s
 difference is inside the run-to-run spread.
 
-### Service classes under a batch flood (3 repeats)
+### Interactive runs under a batch flood (2 repeats, both shown)
 
-24 batch sub-agents flooding the replicas, 4 interactive ones beside them, 3
-minutes per run. SGLang runs with `--enable-priority-scheduling` in every row.
-Measured with 8 turns per engine, 2 of them kept for interactive runs.
+48 batch runs flooding the replicas, 4 interactive runs beside them, 3 minutes per
+window, 8000-character contexts, up to 3 tool calls per run, closed loop (a finished
+run is replaced at once). Both engines queued requests in the no-scheduler arm, so
+the pool was saturated. SGLang runs with `--enable-priority-scheduling` in every
+row; no priorities are sent.
 
-| | Interactive runs/min | Interactive run time p50 / p90 | Batch runs/min | Total runs/min |
-|---|---|---|---|---|
-| class-blind (first come, first served) | 6.0 | 34.3 s / 48.0 s | 37.6 | 43.5 |
-| SGLang priority only (interactive 100, batch 0, pre-emption on; no luftpause slot limit) | 9.7 | 23.8 s / 31.7 s | 34.4 | 44.1 |
-| **luftpause classes** | **14.2** | **16.1 s / 23.0 s** | 31.0 | 45.2 |
-| luftpause classes + SGLang priority | 13.7 | 16.8 s / 25.2 s | 31.8 | 45.5 |
+**Agents with their own loop**, `base_url` at luftpause (`tools/loadgen --agents`):
 
-Interactive throughput is 2.4× class-blind and 1.46× SGLang priority; batch gives
-up 18 %, total runs/min do not drop. Engine priority on top changes nothing
-measurable.
+| | Interactive runs/min | Interactive run time p50 | Batch runs/min |
+|---|---|---|---|
+| straight to the SGLang router, class-blind | 6.0 / 6.7 | 38.5 s / 33.6 s | 83.7 / 82.3 |
+| luftpause, admission by engine load only | 8.7 / 9.0 | 23.2 s / 25.9 s | 79.3 / 79.0 |
+| **luftpause, admission by KV memory** | **13.0 / 10.7** | **17.8 s / 20.8 s** | 76.3 / 76.0 |
+
+**Sub-agents over MCP** (`tools/loadgen --spawn`):
+
+| | Interactive runs/min | Interactive run time p50 | Batch runs/min |
+|---|---|---|---|
+| runtime straight to the SGLang router | 3.0 / 3.0 | 56.6 s / 59.5 s | 39.2 / 36.5 |
+| luftpause, admission by engine load only | 4.0 / 5.0 | 44.4 s / 36.7 s | 35.5 / 36.6 |
+| **luftpause, admission by KV memory** | **6.3 / 6.6** | **29.7 s / 35.4 s** | 35.5 / 35.5 |
+
+Interactive throughput is about 2× the class-blind router on both paths; batch gives
+up 8 % through the proxy and nothing over MCP. The two luftpause rows differ in
+admission only: the load-only rule moved 39 of 48 batch runs between replicas
+mid-run (losing their prefix cache), the KV rule moved none, so part of its gain is
+that stricter affinity. With light load (2000-character contexts, 24 batch runs)
+the engines never queue and all rows tie at about 14 interactive runs/min.
 
 ### Claude Code as the client
 
