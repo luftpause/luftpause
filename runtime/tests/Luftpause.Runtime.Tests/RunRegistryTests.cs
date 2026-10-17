@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 
 namespace Luftpause.Runtime.Tests;
 
@@ -41,11 +42,13 @@ public sealed class RunRegistryTests : IDisposable
         }
     }
 
-    private RunRegistry Registry(params JournalRecord[] history)
+    private RunRegistry Registry(params JournalRecord[] history) => Registry(TimeProvider.System, history);
+
+    private RunRegistry Registry(TimeProvider clock, params JournalRecord[] history)
     {
         journal = new RunJournal(path);
         return new RunRegistry(loop, journal, history, new LlmClient(new HttpClient(new Ok()) { BaseAddress = new Uri("http://dataplane/") }),
-            TimeProvider.System, NullLogger<RunRegistry>.Instance);
+            clock, NullLogger<RunRegistry>.Instance);
     }
 
     private static JsonObject Message(string role) => new() { ["role"] = role, ["content"] = role };
@@ -274,6 +277,86 @@ public sealed class RunRegistryTests : IDisposable
         await Task.WhenAll(parent.Completion, child.Completion);
 
         Assert.False(registry.Cancel(parent.Handle));
+    }
+
+    private void SpendTokensThenWait(long promptTokens) =>
+        loop.Run = async (start, report, cancel) =>
+        {
+            if (start.Spec.Task == "spends")
+                report(new RunProgress(RunWork.None with { PromptTokens = promptTokens, CompletionTokens = 10 }, []));
+            await Task.Delay(Timeout.Infinite, cancel);
+            throw new UnreachableException();
+        };
+
+    private static Task<RunOutcome> Finished(RunRecord record) => record.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+
+    [Fact]
+    public async Task Children_spending_past_the_parents_token_budget_cancel_the_parent_and_its_running_children()
+    {
+        SpendTokensThenWait(50);
+        var registry = Registry();
+        var parent = registry.Spawn(Spec with { Budget = new BudgetLimits(100, null, null) });
+        var idle = registry.Spawn(Spec, parent.Handle);
+        var first = registry.Spawn(Spec with { Task = "spends" }, parent.Handle);
+        var second = registry.Spawn(Spec with { Task = "spends" }, first.Handle);
+
+        var outcomes = await Task.WhenAll(new[] { parent, idle, first, second }.Select(Finished));
+
+        Assert.All(outcomes, o => Assert.Equal((RunStatus.Cancelled, "budget exceeded: tokens 120/100"), (o.Status, o.Error)));
+        var budget = registry.View(parent, DateTimeOffset.UtcNow).Budget!;
+        Assert.Equal(new BudgetOverrun("tokens", 120, 100), budget.Exceeded);
+        Assert.Equal((120L, 0), (budget.Used.Tokens, budget.Used.ToolCalls));
+    }
+
+    [Fact]
+    public async Task A_childs_budget_cancels_only_its_own_subtree()
+    {
+        SpendTokensThenWait(50);
+        var registry = Registry();
+        var parent = registry.Spawn(Spec);
+        var sibling = registry.Spawn(Spec, parent.Handle);
+        var child = registry.Spawn(Spec with { Budget = new BudgetLimits(40, null, null) }, parent.Handle);
+        var grandchild = registry.Spawn(Spec with { Task = "spends" }, child.Handle);
+
+        var outcomes = await Task.WhenAll(Finished(child), Finished(grandchild));
+
+        Assert.All(outcomes, o => Assert.Equal("budget exceeded: tokens 60/40", o.Error));
+        Assert.Equal(new BudgetOverrun("tokens", 60, 40), registry.View(child, DateTimeOffset.UtcNow).Budget!.Exceeded);
+        Assert.False(parent.Cancel.IsCancellationRequested);
+        Assert.False(sibling.Cancel.IsCancellationRequested);
+        Assert.Null(registry.View(parent, DateTimeOffset.UtcNow).Budget);
+    }
+
+    [Fact]
+    public async Task A_seconds_budget_trips_an_idle_subtree()
+    {
+        SpendTokensThenWait(0);
+        var clock = new FakeTimeProvider(DateTimeOffset.UnixEpoch);
+        var registry = Registry(clock);
+        var parent = registry.Spawn(Spec with { Budget = new BudgetLimits(null, null, 30) });
+        var child = registry.Spawn(Spec, parent.Handle);
+
+        clock.Advance(TimeSpan.FromSeconds(29));
+        Assert.False(parent.Cancel.IsCancellationRequested);
+        clock.Advance(TimeSpan.FromSeconds(1));
+
+        var outcomes = await Task.WhenAll(Finished(parent), Finished(child));
+        Assert.All(outcomes, o => Assert.Equal((RunStatus.Cancelled, "budget exceeded: seconds 30/30"), (o.Status, o.Error)));
+        Assert.Equal(new BudgetOverrun("seconds", 30, 30), registry.View(parent, clock.GetUtcNow()).Budget!.Exceeded);
+    }
+
+    [Fact]
+    public async Task A_budget_overrun_survives_a_restart()
+    {
+        SpendTokensThenWait(50);
+        var parent = Registry().Spawn(Spec with { Task = "spends", Budget = new BudgetLimits(10, null, null) });
+        await Finished(parent);
+        journal!.Dispose();
+
+        var resumed = Registry([.. RunJournal.Replay(path)]);
+        resumed.ResumeAll();
+
+        Assert.Equal(new BudgetOverrun("tokens", 60, 10), resumed.View(resumed.Find(parent.Handle)!, DateTimeOffset.UtcNow).Budget!.Exceeded);
     }
 
     private RunStart SingleStart()

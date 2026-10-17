@@ -26,15 +26,19 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         [Description("Names of the tools this run may use; all configured tools when omitted.")] string[]? tools = null,
         [Description("Longest reply per model turn, in tokens; 0 leaves it to the engine. Engines that reserve memory per request (SGLang) batch far fewer requests without it.")] int maxTokens = 256,
         [Description("Let the model ask for several tool calls in one reply, run at once. Off by default: Llama 3.x takes one call per reply.")] bool parallelToolCalls = false,
-        [Description("Handle of the run this one belongs to; cancelling the parent cancels it.")] string? parent = null)
+        [Description("Handle of the run this one belongs to; cancelling the parent cancels it.")] string? parent = null,
+        [Description("Prompt plus completion tokens this run and every run under it may use; over it, the subtree is cancelled.")] long? budgetTokens = null,
+        [Description("Tool calls this run and every run under it may make; over it, the subtree is cancelled.")] int? budgetToolCalls = null,
+        [Description("Wall-clock seconds this run may take, its subtree included; when they pass, the subtree is cancelled.")] double? budgetSeconds = null)
     {
         var allowed = tools is { Length: > 0 } ? tools.ToHashSet(StringComparer.Ordinal) : null;
-        var spec = new RunSpec(task, model ?? defaults.Model, serviceClass, system, Math.Max(maxToolCalls, 0), allowed, maxTokens > 0 ? maxTokens : null, parallelToolCalls, server.SessionId);
         try
         {
+            var spec = new RunSpec(task, model ?? defaults.Model, serviceClass, system, Math.Max(maxToolCalls, 0), allowed, maxTokens > 0 ? maxTokens : null, parallelToolCalls, server.SessionId,
+                BudgetLimits.Of(budgetTokens, budgetToolCalls, budgetSeconds));
             return new { handle = runs.Spawn(spec, parent).Handle };
         }
-        catch (InvalidOperationException e)
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException)
         {
             throw new McpException(e.Message);
         }
