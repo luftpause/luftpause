@@ -155,6 +155,7 @@ flowchart LR
 | Routers as backends | a replica can be a router (e.g. the SGLang router) that picks the engine; its load is read from the engines behind it (`LoadFrom`) |
 | Routing by model | endpoints declare the models they serve; a turn only goes to a replica serving its model; an unknown model gets 404 at once |
 | Hosted endpoints | any OpenAI-compatible API (vLLM on RunPod, OpenAI, OpenRouter, …) as a replica: API key from an environment variable, health path per endpoint, https |
+| Scheduler restart | the dataplane keeps every run's last replica, phase, class and caller (idle runs dropped after 30 min) and every turn in flight; on startup and after any reconnect it sends them to the scheduler (`Resync`) before reopening the event stream, so affinity, paused-interactive headroom and capacity counts survive a scheduler restart; turns held during the outage are admitted again under the same turn id once it is back
 | Health | `/health` (or any path per endpoint) probed every 2 s; unhealthy replicas receive no turns |
 | Tool-call hygiene | arguments coerced to the schema's scalar types, validated, and rejected with the expected shape instead of a silent bad call; calls written as text are recovered |
 | Run identity | `x-luftpause-run-id`, or the `tool_call_id`s an agent echoes back |
@@ -179,7 +180,7 @@ keeps the run's affinity and fairness standing.
 | Engine fails mid-stream | `200`, the chunks sent so far, then the connection closes without the final chunk or `[DONE]` | reports the turn failed | treat the reply as lost, discard it, retry the whole turn with the same run id |
 | Engine refuses at once (429, 5xx) | the engine's status and body, unchanged, with its `Retry-After` | reports the turn started and failed | on 429, wait `Retry-After` (else about 1 s) and retry with the same run id; on 5xx, retry a few times with backoff, then give up |
 | Unknown model | `404`, `no Generative replica serves model '<model>'` | refuses before queueing; no engine request, no turn recorded | give up: fix the model name or the endpoint config; a retry gets the same answer |
-| Scheduler unreachable | `503`, `scheduler: <error>`, within 2 s, no run id header | no engine request; nothing is recorded | retry with the run id it sent, with backoff; without one, the retry starts a new run unless its tool results name the old one |
+| Scheduler unreachable or restarting | nothing: the turn is held, as if queued, until the scheduler answers or the client disconnects | retries the admission every second under the same turn id; on reconnect resyncs runs and turns in flight before admitting again; no engine request until then | nothing; a client-side timeout shorter than the outage behaves like any held turn's: retry with the same run id |
 
 ## Constants
 
