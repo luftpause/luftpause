@@ -158,6 +158,7 @@ flowchart LR
 | Tool-call hygiene | arguments coerced to the schema's scalar types, validated, and rejected with the expected shape instead of a silent bad call; calls written as text are recovered |
 | Run identity | `x-luftpause-run-id`, or the `tool_call_id`s an agent echoes back |
 | Single-pass engines | `POST /v1/decide` (vLLM `/classify` shape) on separate replicas, outside run state; `decide` with caller-given `labels` needs no second model and runs as one interactive turn on a generative replica |
+| Tracing | with `OTEL_EXPORTER_OTLP_ENDPOINT` set, each service exports OpenTelemetry spans over OTLP (GenAI conventions): the runtime an `invoke_agent` span per run (child of the parent run, or of the `traceparent` on the MCP request that called `spawn`), a `chat` span per model turn with tokens and finish reason, an `execute_tool` span per tool call; the dataplane a span per proxied turn; the scheduler an `admit` span with `luftpause.replica` and `luftpause.held_ms`; W3C `traceparent` goes to the dataplane, the scheduler, the engines and HTTP tool servers, and turn events carry the trace id; with the variable unset nothing is exported |
 
 ## Failure semantics
 
@@ -220,6 +221,12 @@ On one GPU, two SGLang replicas of Llama-3.2-1B FP8 (the test bed used below):
 
 ```bash
 docker compose -f compose.yaml -f compose.testbed.yaml up -d --build scheduler dataplane runtime fake-mcp sglang-a sglang-b
+```
+
+Traces in Jaeger: add `compose.otel.yaml`, which starts `jaegertracing/all-in-one` and points the three services' `OTEL_EXPORTER_OTLP_ENDPOINT` at it; a harness that sends `traceparent` on its MCP calls sees its sub-agents, their turns and the scheduler's admission inside its own trace. The UI is on http://localhost:16686.
+
+```bash
+docker compose -f compose.yaml -f compose.otel.yaml up -d --build
 ```
 
 A hosted vLLM pod as an extra replica (key and pod id from the environment):
