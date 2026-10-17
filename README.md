@@ -71,6 +71,26 @@ appears when the engines are saturated, which is when it matters.
   LLM turns on the pool, tool calls to upstream MCP servers, the MCP session as the
   caller, and a journal so the runs outlive the process.
 
+`examples/` has three own-loop agents that set all three headers: the `openai`
+package, the OpenAI Agents SDK and LangGraph.
+
+### Connect from
+
+A harness that cannot set a header per run still works through the proxy: the run
+is recognised by the `tool_call_id`s it echoes back, and a fixed
+`x-luftpause-caller` is enough for fairness.
+
+| Tool | MCP door | Proxy door |
+|---|---|---|
+| Claude Code | `claude mcp add --transport http luftpause http://localhost:7000/mcp` | n/a: speaks the Anthropic Messages API, not Chat Completions |
+| Codex CLI | `~/.codex/config.toml`: `[mcp_servers.luftpause]` `url = "http://localhost:7000/mcp"` | n/a: `wire_api` accepts only `responses`; the proxy serves Chat Completions |
+| Gemini CLI | `gemini mcp add --transport http luftpause http://localhost:7000/mcp`, or `.gemini/settings.json`: `{"mcpServers": {"luftpause": {"httpUrl": "http://localhost:7000/mcp"}}}` | n/a: speaks the Gemini API (unverified) |
+| Goose | `goose session --with-streamable-http-extension "http://localhost:7000/mcp"`, or `goose configure` → Add Extension → Remote Extension (Streamable HTTP) | `GOOSE_PROVIDER=openai OPENAI_HOST=http://localhost:8080 OPENAI_API_KEY=x OPENAI_CUSTOM_HEADERS="x-luftpause-caller=goose"` |
+| Cursor | `~/.cursor/mcp.json`: `{"mcpServers": {"luftpause": {"url": "http://localhost:7000/mcp"}}}` | n/a: "Override OpenAI Base URL" is called from Cursor's servers, which cannot reach localhost (unverified) |
+| Zed | `settings.json`: `"context_servers": {"luftpause": {"url": "http://localhost:7000/mcp"}}` | `settings.json`: `"language_models": {"openai_compatible": {"luftpause": {"api_url": "http://localhost:8080/v1", "available_models": [{"name": "<model>", "max_tokens": 128000}], "custom_headers": {"x-luftpause-caller": "zed"}}}}` |
+| OpenHands | Settings → MCP Servers → add `http://localhost:7000/mcp` | Settings → LLM → Advanced: Custom Model `openai/<model>`, Base URL `http://localhost:8080/v1`, any API key; no header setting |
+| Cline / Roo Code | Cline `cline_mcp_settings.json`: `{"mcpServers": {"luftpause": {"type": "streamableHttp", "url": "http://localhost:7000/mcp"}}}`; Roo `.roo/mcp.json`: same with `"type": "streamable-http"` | Provider "OpenAI Compatible", Base URL `http://localhost:8080/v1`, any API key; `x-luftpause-caller` under Custom Headers (unverified) |
+
 ## Architecture
 
 ```mermaid
