@@ -8,6 +8,7 @@ builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.Http2.MaxStreamsPerCo
 var topology = builder.Configuration.GetSection("Engines").Get<EngineTopology>() ?? new EngineTopology();
 
 builder.Services.AddGrpc();
+builder.Services.AddSchedulerTracing(builder.Configuration);
 builder.Services.ConfigureHttpJsonOptions(json => json.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(topology);

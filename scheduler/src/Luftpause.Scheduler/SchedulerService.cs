@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Grpc.Core;
 using Luftpause.Scheduling;
 using Proto = Luftpause.Protocol.V1;
@@ -10,14 +11,19 @@ public sealed class SchedulerService(
 {
     public override async Task<Proto.Decision> Admit(Proto.TurnRequest request, ServerCallContext context)
     {
+        var turn = ProtocolMapping.ToEvent(request);
+        using var activity = Tracing.Source.StartActivity(
+            "admit", ActivityKind.Server, AdmitTrace.Parent(context.RequestHeaders.GetValue("traceparent")), AdmitTrace.Requested(turn));
         var requested = time.GetTimestamp();
         var placed = waiters.Register(request.TurnId);
-        dispatcher.Apply(ProtocolMapping.ToEvent(request));
+        dispatcher.Apply(turn);
         try
         {
             var action = await placed.WaitAsync(context.CancellationToken);
             context.CancellationToken.ThrowIfCancellationRequested();
-            LogAdmitted(request, action, time.GetElapsedTime(requested));
+            var held = time.GetElapsedTime(requested);
+            activity?.SetTags(AdmitTrace.Admitted(action, held));
+            LogAdmitted(request, action, held);
             return ProtocolMapping.ToDecision(action, credentials);
         }
         catch (OperationCanceledException)
