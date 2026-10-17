@@ -8,7 +8,7 @@ public sealed class Decider(IRoutingPolicy routing)
         TurnCompleted completed => Drain(TurnLifecycle.Complete(state, completed)),
         TurnAbandoned abandoned => Drain(TurnLifecycle.Abandon(state, abandoned)),
         ReplicaHealthChanged health => Drain(Health.Apply(state, health)),
-        RunEnded ended => Drain(state with { Runs = state.Runs.Remove(ended.RunId) }),
+        RunEnded ended => End(state, ended),
         ReplicaLoadReported load => Drain(EngineLoad.Apply(state, load)),
         Tick tick => Drain(Expiry.Apply(state, tick)),
         _ => Decision.Unchanged(state),
@@ -33,6 +33,14 @@ public sealed class Decider(IRoutingPolicy routing)
 
         var started = inRun ? TurnLifecycle.Start(state, request, replica) : TurnLifecycle.StartDetached(state, request, replica);
         return new Decision(started, [new RouteTurn(request.TurnId, replica)]);
+    }
+
+    private Decision End(SchedulerState state, RunEnded ended)
+    {
+        var orphans = state.Waiting.Where(w => w.RunId == ended.RunId).ToList();
+        var cleared = orphans.Aggregate(state, (s, w) => WaitQueue.Remove(s, w.TurnId)) with { Runs = state.Runs.Remove(ended.RunId) };
+        var refused = new Decision(cleared, [.. orphans.Select(w => new RefuseTurn(w.TurnId, $"run '{ended.RunId}' has ended"))]);
+        return refused.Then(Drain);
     }
 
     private Decision Drain(SchedulerState state) => WaitQueue.Drain(state, Place);

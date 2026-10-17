@@ -130,12 +130,16 @@ public class SchedulerProperties
         var drainedRuns = routes.Select(r => step.Requested(r.TurnId)).Where(r => r.Class == EngineClass.Generative).Select(r => r.RunId).ToHashSet();
         var expectedInFlight = before.InFlight.SetItems(routes.GroupBy(r => r.Replica.Id).Select(g => KeyValuePair.Create(g.Key, before.InFlightOn(g.Key) + g.Count())));
 
+        var orphans = before.Waiting.Where(w => w.RunId == runId).Select(w => w.TurnId).ToHashSet();
+        var refused = step.After.Actions.OfType<RefuseTurn>().Select(r => r.TurnId).ToHashSet();
+
         string?[] differences =
         [
             after.Runs.ContainsKey(runId) ? $"{runId} is still in Runs as {after.Runs[runId]}" : null,
+            refused.SetEquals(orphans) ? null : "refused turns are not exactly the ended run's waiting turns",
             Same(before.Runs.Remove(runId).RemoveRange(drainedRuns), after.Runs.Remove(runId).RemoveRange(drainedRuns)) ? null : "other runs changed",
             Same(before.Turns, after.Turns.RemoveRange(routed)) ? null : "turns other than the drained ones changed",
-            before.Waiting.Where(w => !routed.Contains(w.TurnId)).SequenceEqual(after.Waiting) ? null : "waiting changed beyond the drain",
+            before.Waiting.Where(w => !routed.Contains(w.TurnId) && !orphans.Contains(w.TurnId)).SequenceEqual(after.Waiting) ? null : "waiting changed beyond the drain and the refusals",
             Same(expectedInFlight, after.InFlight) ? null : "in-flight counts changed beyond the drain",
             after.Routed == before.Routed + routes.Count ? null : "routed count changed beyond the drain",
             after.Replicas.SequenceEqual(before.Replicas) ? null : "replicas changed",
@@ -147,6 +151,6 @@ public class SchedulerProperties
         return differences.FirstOrDefault(d => d is not null);
     }
 
-    private static bool Same<TValue>(IReadOnlyDictionary<string, TValue> left, IReadOnlyDictionary<string, TValue> right) =>
+    private static bool Same<TKey, TValue>(IReadOnlyDictionary<TKey, TValue> left, IReadOnlyDictionary<TKey, TValue> right) where TKey : notnull =>
         left.Count == right.Count && left.All(kv => right.TryGetValue(kv.Key, out var other) && Equals(kv.Value, other));
 }
