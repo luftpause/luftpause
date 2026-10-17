@@ -209,6 +209,7 @@ budget is spent. What is left:
 docker compose up -d --build                     # scheduler, dataplane, runtime, fake engines, fake MCP tools
 dotnet run --project tools/loadgen -- --spawn 10 # fan 10 sub-agents out over MCP and await them
 dotnet run --project tools/loadgen -- --agents 8 --duration-s 60 --class batch --caller me # 8 own-loop agents through the proxy, closed loop
+tools/check.sh                                   # both .NET test projects, loadgen, cargo test (when cargo is installed), image builds
 ```
 
 An Ollama on the host as the only replica (model from `OLLAMA_MODEL`, default `llama3.2:1b`):
@@ -239,7 +240,9 @@ RUNPOD_POD_ID=<pod-id> RUNPOD_KEY=<key> docker compose -f compose.yaml -f compos
 
 One laptop, RTX 4060 Laptop 8 GB, two SGLang replicas of Llama-3.2-1B-Instruct FP8
 unless stated. Repeats are noted per table; differences inside the spread are
-noise.
+noise. The flood tables come from `tools/bench/flood.sh` (sub-agents over MCP)
+and `tools/bench/proxy-flood.sh` (own-loop agents); each takes the git revisions
+to compare as arms and builds them into their own image tags.
 
 ### Fan-out: `spawn` × 16 + `await all` vs one sub-agent at a time (3 repeats)
 
