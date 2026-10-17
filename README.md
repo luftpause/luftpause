@@ -159,6 +159,7 @@ flowchart LR
 | Run identity | `x-luftpause-run-id`, or the `tool_call_id`s an agent echoes back |
 | Single-pass engines | `POST /v1/decide` (vLLM `/classify` shape) on separate replicas, outside run state; `decide` with caller-given `labels` needs no second model and runs as one interactive turn on a generative replica |
 | Tracing | with `OTEL_EXPORTER_OTLP_ENDPOINT` set, each service exports OpenTelemetry spans over OTLP (GenAI conventions): the runtime an `invoke_agent` span per run (child of the parent run, or of the `traceparent` on the MCP request that called `spawn`), a `chat` span per model turn with tokens and finish reason, an `execute_tool` span per tool call; the dataplane a span per proxied turn; the scheduler an `admit` span with `luftpause.replica` and `luftpause.held_ms`; W3C `traceparent` goes to the dataplane, the scheduler, the engines and HTTP tool servers, and turn events carry the trace id; with the variable unset nothing is exported |
+| Auth | with `LUFTPAUSE_TOKEN` set, every `/v1` route of the dataplane and the runtime's `/mcp` and `GET /status` require `Authorization: Bearer <token>` (compared in constant time) and answer 401 with a JSON error otherwise; the runtime sends the same bearer to the dataplane; the client's `Authorization` never goes upstream, engines get the key configured for them; with the variable unset both services log a warning and accept everyone |
 
 ## Failure semantics
 
@@ -211,6 +212,8 @@ dotnet run --project tools/loadgen -- --spawn 10 # fan 10 sub-agents out over MC
 dotnet run --project tools/loadgen -- --agents 8 --duration-s 60 --class batch --caller me # 8 own-loop agents through the proxy, closed loop
 tools/check.sh                                   # both .NET test projects, loadgen, cargo test (when cargo is installed), image builds
 ```
+
+With a token: `LUFTPAUSE_TOKEN=<token> docker compose up -d`, then `claude mcp add --transport http luftpause http://localhost:7000/mcp --header "Authorization: Bearer <token>"`.
 
 An Ollama on the host as the only replica (model from `OLLAMA_MODEL`, default `llama3.2:1b`):
 
