@@ -39,11 +39,20 @@ public sealed class RunRegistryTests : IDisposable
         }
     }
 
-    private RunRegistry Registry(params JournalRecord[] history)
+    private sealed class Clock : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = DateTimeOffset.UnixEpoch;
+
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    private RunRegistry Registry(params JournalRecord[] history) => Registry(TimeProvider.System, history);
+
+    private RunRegistry Registry(TimeProvider time, params JournalRecord[] history)
     {
         journal = new RunJournal(path);
         return new RunRegistry(loop, journal, history, new LlmClient(new HttpClient(new Ok()) { BaseAddress = new Uri("http://dataplane/") }),
-            TimeProvider.System, NullLogger<RunRegistry>.Instance);
+            time, NullLogger<RunRegistry>.Instance);
     }
 
     private static JsonObject Message(string role) => new() { ["role"] = role, ["content"] = role };
@@ -122,17 +131,17 @@ public sealed class RunRegistryTests : IDisposable
 
         public void Report(RunView value) => seen.Writer.TryWrite(value);
 
-        public async Task<(int Turns, int ToolCalls)> NextAsync()
+        public async Task<(RunStatus Status, int Turns, int ToolCalls, double Elapsed)> NextAsync()
         {
             var view = await seen.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
-            return (view.Turns, view.ToolCalls);
+            return (view.Status, view.Turns, view.ToolCalls, view.ElapsedSeconds);
         }
 
         public bool Idle => !seen.Reader.TryPeek(out _);
     }
 
     [Fact]
-    public async Task Await_reports_each_change_in_a_runs_work_and_returns_the_final_state()
+    public async Task Await_reports_where_each_run_stands_then_every_change_and_returns_the_final_state()
     {
         var step = new SemaphoreSlim(0);
         loop.Run = async (_, report, _) =>
@@ -144,20 +153,39 @@ public sealed class RunRegistryTests : IDisposable
             await step.WaitAsync();
             return new RunOutcome(RunStatus.Completed, "answer", null);
         };
-        var registry = Registry();
+        var registry = Registry(new Clock());
         var record = registry.Spawn(Spec);
         var watcher = new Watcher();
 
         var waiting = registry.AwaitAsync([record.Handle], true, TimeSpan.FromSeconds(30), watcher, CancellationToken.None);
+        Assert.Equal((RunStatus.Running, 0, 0, 0.0), await watcher.NextAsync());
         step.Release();
-        Assert.Equal((1, 0), await watcher.NextAsync());
+        Assert.Equal((RunStatus.Running, 1, 0, 0.0), await watcher.NextAsync());
         step.Release();
-        Assert.Equal((1, 1), await watcher.NextAsync());
+        Assert.Equal((RunStatus.Running, 1, 1, 0.0), await watcher.NextAsync());
         step.Release();
+        Assert.Equal((RunStatus.Completed, 1, 1, 0.0), await watcher.NextAsync());
         var views = await waiting;
 
         Assert.Equal(("answer", 1, 1), (views[0].Answer, views[0].Turns, views[0].ToolCalls));
         Assert.True(watcher.Idle);
+    }
+
+    [Fact]
+    public async Task Await_reports_each_whole_second_a_run_has_been_going()
+    {
+        var clock = new Clock();
+        var registry = Registry(clock);
+        var record = registry.Spawn(Spec);
+        var watcher = new Watcher();
+
+        var waiting = registry.AwaitAsync([record.Handle], true, TimeSpan.FromSeconds(30), watcher, CancellationToken.None);
+        Assert.Equal(0.0, (await watcher.NextAsync()).Elapsed);
+        clock.Now += TimeSpan.FromSeconds(0.4);
+        clock.Now += TimeSpan.FromSeconds(0.8);
+        Assert.Equal(1.2, (await watcher.NextAsync()).Elapsed, 3);
+        registry.Cancel(record.Handle);
+        await waiting;
     }
 
     [Fact]

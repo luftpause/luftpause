@@ -22,7 +22,7 @@ public class AwaitProgressTests
 
         progress.Report(View("run-a", 2, 1, 3.25));
 
-        Assert.Equal("run-a turns=2 toolCalls=1 elapsed=3.3s", Assert.Single(sink.Sent).Message);
+        Assert.Equal("""{"handle":"run-a","status":"running","turns":2,"toolCalls":1,"elapsedSeconds":3}""", Assert.Single(sink.Sent).Message);
     }
 
     [Fact]

@@ -1,4 +1,4 @@
-using System.Globalization;
+using System.Text.Json;
 using ModelContextProtocol;
 
 namespace Luftpause.Runtime;
@@ -11,5 +11,12 @@ public sealed class AwaitProgress(IProgress<ProgressNotificationValue> notify) :
         notify.Report(new ProgressNotificationValue { Progress = Interlocked.Increment(ref sent), Message = Describe(value) });
 
     private static string Describe(RunView view) =>
-        string.Create(CultureInfo.InvariantCulture, $"{view.Handle} turns={view.Turns} toolCalls={view.ToolCalls} elapsed={view.ElapsedSeconds:0.0}s");
+        JsonSerializer.Serialize(new
+        {
+            handle = view.Handle,
+            status = view.Status.ToString().ToLowerInvariant(),
+            turns = view.Turns,
+            toolCalls = view.ToolCalls,
+            elapsedSeconds = (long)view.ElapsedSeconds,
+        });
 }

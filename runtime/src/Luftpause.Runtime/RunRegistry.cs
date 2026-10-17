@@ -55,15 +55,22 @@ public sealed class RunRegistry(
     {
         var records = handles.Select(Find).OfType<RunRecord>().ToList();
         var deadline = Task.Delay(timeout, time, cancel);
-        var reported = records.Select(r => r.Work).ToList();
+        var reported = Views(records).Select(v => v.Status == RunStatus.Running ? (RunMark?)null : RunMark.Of(v)).ToList();
         while (true)
         {
             var signals = records.Select(r => r.WorkChanged).ToList();
-            reported = Report(records, reported, progress);
+            reported = Report(Views(records), reported, progress);
             if (!Waiting(records, all) || deadline.IsCompleted)
                 break;
-            await Task.WhenAny([deadline, .. signals, .. records.Select(r => r.Completion)]);
+            await Task.WhenAny([deadline, Task.Delay(ElapsedStep, time, cancel), .. signals, .. records.Select(r => r.Completion)]);
         }
+        return Views(records);
+    }
+
+    private static readonly TimeSpan ElapsedStep = TimeSpan.FromSeconds(1);
+
+    private List<RunView> Views(IReadOnlyList<RunRecord> records)
+    {
         var now = time.GetUtcNow();
         return records.Select(r => View(r, now)).ToList();
     }
@@ -71,13 +78,17 @@ public sealed class RunRegistry(
     private static bool Waiting(IReadOnlyList<RunRecord> records, bool all) =>
         records.Any(r => !r.Completion.IsCompleted) && (all || records.All(r => !r.Completion.IsCompleted));
 
-    private List<RunWork> Report(IReadOnlyList<RunRecord> records, IReadOnlyList<RunWork> reported, IProgress<RunView> progress)
+    private static List<RunMark?> Report(IReadOnlyList<RunView> views, IReadOnlyList<RunMark?> reported, IProgress<RunView> progress)
     {
-        var now = time.GetUtcNow();
-        var current = records.Select(r => r.Work).ToList();
-        foreach (var (record, _) in records.Zip(current, reported).Where(r => r.Second != r.Third).Select(r => (r.First, r.Second)))
-            progress.Report(View(record, now));
+        var current = views.Select(v => (RunMark?)RunMark.Of(v)).ToList();
+        foreach (var view in views.Zip(current, reported).Where(v => v.Second != v.Third).Select(v => v.First))
+            progress.Report(view);
         return current;
+    }
+
+    private sealed record RunMark(RunStatus Status, int Turns, int ToolCalls, long ElapsedSeconds)
+    {
+        public static RunMark Of(RunView view) => new(view.Status, view.Turns, view.ToolCalls, (long)view.ElapsedSeconds);
     }
 
     private void Adopt(RunRecord record)
