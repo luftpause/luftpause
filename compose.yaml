@@ -17,6 +17,7 @@ services:
       Engines__SinglePass__0__Id: fake-classify
       Engines__SinglePass__0__BaseUrl: http://fake-classify:9000
       Engines__SinglePass__0__Kind: VllmClassify
+    ports: ["5001:5001"]
 
   dataplane:
     build: { context: ., dockerfile: dataplane/Dockerfile }
