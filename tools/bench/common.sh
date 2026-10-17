@@ -35,7 +35,7 @@ build_arm() {
   run git -C "$ROOT" worktree add --detach "$wt" "$rev"
   run docker compose -f "$wt/compose.yaml" --project-directory "$wt" build $IMAGES
   for i in $IMAGES; do
-    run docker tag "luftpause-$i:latest" "luftpause-$i:$tag"
+    run docker tag "${LUFTPAUSE_REGISTRY:-ghcr.io/luftpause}/$i:latest" "${LUFTPAUSE_REGISTRY:-ghcr.io/luftpause}/$i:$tag"
   done
   run git -C "$ROOT" worktree remove --force "$wt"
 }
@@ -44,7 +44,7 @@ tag_latest() {
   local tag
   tag=$(arm_tag "$1")
   for i in $IMAGES; do
-    run docker tag "luftpause-$i:$tag" "luftpause-$i:latest"
+    run docker tag "${LUFTPAUSE_REGISTRY:-ghcr.io/luftpause}/$i:$tag" "${LUFTPAUSE_REGISTRY:-ghcr.io/luftpause}/$i:latest"
   done
 }
 
