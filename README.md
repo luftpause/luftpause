@@ -365,4 +365,14 @@ the 1B model leans on the first label. Use a larger model or calibrate the score
 
 ## License
 
-[Elastic License 2.0](LICENSE): free to use, modify and redistribute, including inside your company; you may not offer luftpause to others as a hosted or managed service.
+[Elastic License 2.0](LICENSE). In practice: use it, change it, ship it inside
+your product or your company, redistribute it, all free, with no copyleft on your
+own code. The one thing you may not do is offer luftpause itself to third parties
+as a hosted or managed service, and you may not remove the license notices. That
+makes it source-available, not OSI open source, and we say so plainly. The reason
+is the usual one for infrastructure: a small team cannot compete with a cloud
+provider that wraps the project in a console and sells it, and that outcome would
+end the project rather than fund it. If the restriction blocks something you want
+to do, open an issue; a per-case grant is easy. Contributions are accepted under
+the same terms, with a grant that lets the project move to an OSI-approved license
+later (see [CONTRIBUTING.md](CONTRIBUTING.md)).
