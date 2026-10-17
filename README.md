@@ -259,6 +259,18 @@ mattering.
 
 ### Single-pass (vLLM classifier, RoBERTa-base)
 
+luftpause serves two kinds of model on one pool. A **generative** engine (SGLang,
+vLLM, a hosted API) runs an agent's turns: it decodes token by token, keeps a KV
+cache per run, and a turn may end in tool calls that pause the run. A
+**single-pass** engine answers in one forward pass: an encoder or classifier
+(RoBERTa-style, served by vLLM's `/classify`) returns typed labels with
+probabilities, no decoding, no stream, no state between calls. Agents use it for
+the decisions that do not need a generated reply, such as routing a request,
+scoring a tool result or choosing the next step, at a few milliseconds instead of a
+generated turn. Sub-agents reach it through the `decide` MCP tool; own-loop agents
+through `POST /v1/decide`. Single-pass turns are placed on their own replicas and
+never enter run state, so they neither hold nor wait for a generative slot.
+
 | Load | Latency at the data plane |
 |---|---|
 | one call at a time | p50 20.6 ms |
