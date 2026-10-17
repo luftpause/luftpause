@@ -17,7 +17,7 @@ public static class WaitQueue
                 return placed is null ? decision : decision.Then(_ => placed);
             });
 
-    private static string CallerOf(SchedulerState state, TurnRequested waiting) =>
+    public static string CallerOf(SchedulerState state, TurnRequested waiting) =>
         state.Runs.TryGetValue(waiting.RunId, out var run) ? run.Caller : waiting.Caller;
 
     public static SchedulerState Remove(SchedulerState state, string turnId) =>
