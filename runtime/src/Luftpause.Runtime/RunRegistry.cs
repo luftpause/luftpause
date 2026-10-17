@@ -33,6 +33,8 @@ public sealed class RunRegistry(
         }
     }
 
+    public IReadOnlyCollection<RunRecord> All => [.. runs.Values];
+
     public RunRecord? Find(string handle) => runs.GetValueOrDefault(handle);
 
     public IReadOnlyList<string> Children(string handle) => children.GetValueOrDefault(handle, []);
