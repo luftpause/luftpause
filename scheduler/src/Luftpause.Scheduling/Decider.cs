@@ -11,6 +11,7 @@ public sealed class Decider(IRoutingPolicy routing)
         RunEnded ended => End(state, ended),
         ReplicaLoadReported load => Drain(EngineLoad.Apply(state, load)),
         Tick tick => Drain(Expiry.Apply(state, tick)),
+        StateResynced resynced => Drain(Resync.Apply(state, resynced.Snapshot)),
         _ => Decision.Unchanged(state),
     };
 

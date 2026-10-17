@@ -19,6 +19,37 @@ public class SchedulerProperties
                 .FirstOrDefault();
         });
 
+    [Property(MaxTest = Cases, Arbitrary = new[] { typeof(AnyScenario) })]
+    public void Every_runs_last_replica_is_a_known_replica_or_none(Scenario scenario) =>
+        Invariant.HoldsAtEveryStep(scenario, step =>
+        {
+            var state = step.After.State;
+            var known = state.Replicas.Select(r => r.Id).ToHashSet();
+            return state.Runs.Values
+                .Where(r => r.LastReplicaId is { } id && !known.Contains(id))
+                .Select(r => $"{r.RunId} last ran on unknown replica {r.LastReplicaId}")
+                .FirstOrDefault();
+        });
+
+    [Property(MaxTest = Cases, Arbitrary = new[] { typeof(AnyScenario) })]
+    public void A_resync_keeps_replicas_health_capacity_and_waiting(Scenario scenario) =>
+        Invariant.HoldsAtEveryStep(scenario, step =>
+        {
+            if (step.Event is not StateResynced resynced)
+                return null;
+            var applied = Resync.Apply(step.Before, resynced.Snapshot);
+            string?[] differences =
+            [
+                applied.Replicas.SequenceEqual(step.Before.Replicas) ? null : "replicas changed",
+                applied.Unhealthy.SetEquals(step.Before.Unhealthy) ? null : "health changed",
+                Same(applied.Capacity, step.Before.Capacity) ? null : "capacity changed",
+                applied.Waiting.SequenceEqual(step.Before.Waiting) ? null : "waiting changed",
+                applied.Turns.Keys.ToHashSet().SetEquals(resynced.Snapshot.Turns.Where(t => applied.Replicas.Any(r => r.Id == t.ReplicaId)).Select(t => t.TurnId))
+                    ? null : "turns are not the snapshot's turns on known replicas",
+            ];
+            return differences.FirstOrDefault(d => d is not null);
+        });
+
     [Property(MaxTest = Cases, Arbitrary = new[] { typeof(CappedScenario) })]
     public void Routing_never_takes_a_replica_past_its_capacity(Scenario scenario) =>
         Invariant.HoldsAtEveryStep(scenario, step =>
@@ -97,9 +128,12 @@ public class SchedulerProperties
         var nextTurns = step.Routes.Select(r => step.Requested(r.TurnId)).Append(step.Event as TurnRequested)
             .Where(r => r is { Class: EngineClass.Generative })
             .Select(r => r!.RunId);
-        var gone = step.Event is Tick or RunEnded
-            ? step.Before.Runs.Keys.Where(run => !step.After.State.Runs.ContainsKey(run))
-            : [];
+        var gone = step.Event switch
+        {
+            StateResynced => step.Before.Runs.Keys,
+            Tick or RunEnded => step.Before.Runs.Keys.Where(run => !step.After.State.Runs.ContainsKey(run)),
+            _ => [],
+        };
         return nextTurns.Concat(gone);
     }
 

@@ -45,6 +45,21 @@ public sealed record TickClock(long AdvanceMs) : Command(AdvanceMs)
     public override string ToString() => $"{After}Tick";
 }
 
+public sealed record SnapshotRun(int Run, int Phase, int? Replica, ServiceClass Service)
+{
+    public override string ToString() => $"run{Run} phase{Phase} r{(Replica?.ToString() ?? "-")} {Service}";
+}
+
+public sealed record SnapshotTurn(int Run, int Replica, string Caller)
+{
+    public override string ToString() => $"run{Run}@r{Replica} {Caller}";
+}
+
+public sealed record ResyncState(long AdvanceMs, SnapshotRun[] Runs, SnapshotTurn[] Turns) : Command(AdvanceMs)
+{
+    public override string ToString() => $"{After}Resync runs=[{string.Join("; ", Runs.Select(r => r.ToString()))}] turns=[{string.Join("; ", Turns.Select(t => t.ToString()))}]";
+}
+
 public sealed record Scenario(Replica[] Replicas, int[]? Capacity, Command[] Commands)
 {
     public override string ToString() =>

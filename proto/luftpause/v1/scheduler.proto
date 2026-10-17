@@ -7,6 +7,7 @@ option csharp_namespace = "Luftpause.Protocol.V1";
 service Scheduler {
   rpc Admit(TurnRequest) returns (Decision);
   rpc Report(stream TurnEvent) returns (ReportAck);
+  rpc Resync(Snapshot) returns (ResyncAck);
 }
 
 enum EngineClass {
@@ -86,3 +87,40 @@ message RunEnded {}
 
 message ReportAck {}
 
+
+enum RunPhase {
+  RUN_PHASE_UNSPECIFIED = 0;
+  RUN_PHASE_GENERATING = 1;
+  RUN_PHASE_AWAITING_TOOL = 2;
+  RUN_PHASE_IDLE = 3;
+}
+
+message Snapshot {
+  repeated RunState runs = 1;
+  repeated InFlightTurn turns = 2;
+  int64 at_unix_ms = 3;
+}
+
+message RunState {
+  string run_id = 1;
+  RunPhase phase = 2;
+  string generating_turn_id = 3;
+  int64 phase_since_unix_ms = 4;
+  string last_replica_id = 5;
+  ServiceClass service_class = 6;
+  string caller = 7;
+  int64 last_activity_unix_ms = 8;
+  int64 started_unix_ms = 9;
+  uint32 turns = 10;
+}
+
+message InFlightTurn {
+  string turn_id = 1;
+  string run_id = 2;
+  string replica_id = 3;
+  ServiceClass service_class = 4;
+  string caller = 5;
+  int64 started_unix_ms = 6;
+}
+
+message ResyncAck {}

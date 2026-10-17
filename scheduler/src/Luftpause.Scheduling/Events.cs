@@ -40,3 +40,5 @@ public sealed record ReplicaHealthChanged(string ReplicaId, bool Healthy, long A
 public sealed record ReplicaLoadReported(string ReplicaId, int Running, int Waiting, long AtUnixMs) : SchedulerEvent(AtUnixMs);
 
 public sealed record Tick(long AtUnixMs) : SchedulerEvent(AtUnixMs);
+
+public sealed record StateResynced(Snapshot Snapshot, long AtUnixMs) : SchedulerEvent(AtUnixMs);

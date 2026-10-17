@@ -45,6 +45,13 @@ public sealed class SchedulerService(
         return new Proto.ReportAck();
     }
 
+    public override Task<Proto.ResyncAck> Resync(Proto.Snapshot request, ServerCallContext context)
+    {
+        dispatcher.Apply(ProtocolMapping.ToEvent(request));
+        log.LogInformation("state_resynced runs={Runs} turns={Turns}", request.Runs.Count, request.Turns.Count);
+        return Task.FromResult(new Proto.ResyncAck());
+    }
+
     private void LogAdmitted(Proto.TurnRequest request, SchedulerAction action, TimeSpan waited) =>
         log.LogInformation(
             "turn_admitted turn={Turn} run={Run} replica={Replica} waitedMs={WaitedMs}",

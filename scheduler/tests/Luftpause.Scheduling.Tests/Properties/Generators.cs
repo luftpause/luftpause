@@ -63,6 +63,25 @@ public static class Generators
         from run in Gen.Choose(0, Runs - 1)
         select (Command)new EndRun(advance, run);
 
+    private static readonly Gen<SnapshotRun> SnapshotRunGen =
+        from run in Gen.Choose(0, Runs - 1)
+        from phase in Gen.Choose(0, 2)
+        from replica in Gen.Frequency((1, Gen.Constant<int?>(null)), (4, Gen.Choose(0, 4).Select(r => (int?)r)))
+        from service in Gen.Elements(ServiceClass.Interactive, ServiceClass.Batch)
+        select new SnapshotRun(run, phase, replica, service);
+
+    private static readonly Gen<SnapshotTurn> SnapshotTurnGen =
+        from run in Gen.Choose(0, Runs - 1)
+        from replica in Gen.Choose(0, 4)
+        from caller in Gen.Elements("c0", "c1", "c2")
+        select new SnapshotTurn(run, replica, caller);
+
+    private static readonly Gen<Command> Resync =
+        from advance in Advance
+        from runs in Gen.Choose(0, Runs).SelectMany(n => SnapshotRunGen.ArrayOf(n))
+        from turns in Gen.Choose(0, 5).SelectMany(n => SnapshotTurnGen.ArrayOf(n))
+        select (Command)new ResyncState(advance, runs, turns);
+
     private static readonly Gen<Command> Tick = Advance.Select(a => (Command)new TickClock(a));
 
     private static readonly Gen<Command> Command = Gen.Frequency(
@@ -72,7 +91,8 @@ public static class Generators
         (3, Load),
         (1, Health),
         (1, End),
-        (2, Tick));
+        (2, Tick),
+        (1, Resync));
 
     private static Gen<int[]?> Seed(int replicas, Gen<int> each) => each.ArrayOf(replicas).Select(a => (int[]?)a);
 

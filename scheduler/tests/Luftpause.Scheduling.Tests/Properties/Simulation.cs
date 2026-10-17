@@ -34,6 +34,7 @@ public sealed record Trace(Scenario Scenario, ImmutableList<Step> Steps)
         ReplicaHealthChanged h => $"@{h.AtUnixMs} Health {h.ReplicaId} {(h.Healthy ? "healthy" : "unhealthy")}",
         RunEnded r => $"@{r.AtUnixMs} RunEnded {r.RunId}",
         Tick t => $"@{t.AtUnixMs} Tick",
+        StateResynced r => $"@{r.AtUnixMs} Resync runs=[{string.Join("; ", r.Snapshot.Runs)}] turns=[{string.Join("; ", r.Snapshot.Turns)}]",
         _ => e.ToString(),
     };
 }
@@ -86,8 +87,28 @@ public static class Simulation
         SetHealth h => new ReplicaHealthChanged(ReplicaId(scenario, h.Replica), h.Healthy, now),
         EndRun r => new RunEnded($"run{r.Run}", now),
         TickClock => new Tick(now),
+        ResyncState r => Resynced(r, now),
         _ => throw new InvalidOperationException($"unknown command {command}"),
     };
+
+    private static StateResynced Resynced(ResyncState resync, long now)
+    {
+        var turns = resync.Turns.Select((t, i) => new Turn($"s{now}-{i}", $"run{t.Run}", $"r{t.Replica}", now, t.Caller)).ToList();
+        var runs = resync.Runs.DistinctBy(r => r.Run).Select(r => new Run(
+            $"run{r.Run}",
+            r.Phase switch
+            {
+                0 => new Generating(turns.FirstOrDefault(t => t.RunId == $"run{r.Run}")?.TurnId ?? "gone"),
+                1 => new AwaitingTool(now),
+                _ => new Idle(now),
+            },
+            r.Replica is { } replica ? $"r{replica}" : null,
+            1,
+            now,
+            now,
+            r.Service));
+        return new StateResynced(new Snapshot([.. runs], [.. turns]), now);
+    }
 
     private static IReadOnlyList<Turn> InFlight(SchedulerState state) =>
         state.Turns.Values.OrderBy(t => t.TurnId, StringComparer.Ordinal).ToList();

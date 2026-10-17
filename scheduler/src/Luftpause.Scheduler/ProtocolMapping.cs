@@ -12,7 +12,7 @@ public static class ProtocolMapping
         request.Model,
         request.Resumed,
         request.AtUnixMs,
-        request.ServiceClass == Proto.ServiceClass.Batch ? ServiceClass.Batch : ServiceClass.Interactive,
+        ToServiceClass(request.ServiceClass),
         request.Caller);
 
     public static SchedulerEvent? ToEvent(Proto.TurnEvent e) => e.KindCase switch
@@ -29,6 +29,31 @@ public static class ProtocolMapping
         Proto.TurnEvent.KindOneofCase.RunEnded => new RunEnded(e.RunId, e.AtUnixMs),
         _ => null,
     };
+
+    public static StateResynced ToEvent(Proto.Snapshot snapshot) => new(
+        new Snapshot([.. snapshot.Runs.Select(ToRun)], [.. snapshot.Turns.Select(ToTurn)]),
+        snapshot.AtUnixMs);
+
+    private static Run ToRun(Proto.RunState run) => new(
+        run.RunId,
+        ToPhase(run),
+        run.LastReplicaId is "" ? null : run.LastReplicaId,
+        (int)run.Turns,
+        run.LastActivityUnixMs,
+        run.StartedUnixMs,
+        ToServiceClass(run.ServiceClass),
+        run.Caller);
+
+    private static RunPhase ToPhase(Proto.RunState run) => run.Phase switch
+    {
+        Proto.RunPhase.Generating => new Generating(run.GeneratingTurnId),
+        Proto.RunPhase.AwaitingTool => new AwaitingTool(run.PhaseSinceUnixMs),
+        Proto.RunPhase.Idle => new Idle(run.PhaseSinceUnixMs),
+        _ => throw new ArgumentOutOfRangeException(nameof(run), run.Phase, $"run '{run.RunId}' has no phase"),
+    };
+
+    private static Turn ToTurn(Proto.InFlightTurn turn) =>
+        new(turn.TurnId, turn.RunId, turn.ReplicaId, turn.StartedUnixMs, turn.Caller);
 
     public static Proto.Decision ToDecision(SchedulerAction action, EngineCredentials credentials) =>
         action switch
@@ -49,6 +74,9 @@ public static class ProtocolMapping
             },
             _ => throw new ArgumentOutOfRangeException(nameof(action), action, "not a decision"),
         };
+
+    private static ServiceClass ToServiceClass(Proto.ServiceClass serviceClass) =>
+        serviceClass == Proto.ServiceClass.Batch ? ServiceClass.Batch : ServiceClass.Interactive;
 
     private static EngineClass ToEngineClass(Proto.EngineClass engineClass) => engineClass switch
     {
