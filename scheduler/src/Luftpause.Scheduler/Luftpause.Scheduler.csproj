@@ -16,6 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="status.html" LogicalName="status.html" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Protobuf Include="..\..\..\proto\luftpause\v1\scheduler.proto" ProtoRoot="..\..\..\proto" GrpcServices="Server" Link="Protos\scheduler.proto" />
   </ItemGroup>
 

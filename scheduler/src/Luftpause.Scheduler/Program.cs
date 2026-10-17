@@ -26,6 +26,7 @@ builder.Services.AddHostedService<LoadProbe>();
 var app = builder.Build();
 
 app.MapGrpcService<SchedulerService>();
+app.MapGet("/", () => Results.Content(StatusPage.Html, "text/html; charset=utf-8"));
 app.MapGet("/status", (StateStore store, TimeProvider time) =>
     StatusView.From(store.Current, time.GetUtcNow().ToUnixTimeMilliseconds()));
 

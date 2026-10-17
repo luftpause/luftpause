@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>luftpause status</title>
+<style>
+:root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #e2e2e6; --track: #ececf0; --kv: #3b6fd8; --slots: #2f9e6e; --bad: #c8463d; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #151517; --fg: #ececf0; --muted: #9a9aa2; --line: #2c2c31; --track: #26262b; --kv: #6c95ec; --slots: #4cc18e; --bad: #ec6f66; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
+main { max-width: 1100px; margin: 0 auto; }
+h1 { font-size: 18px; margin: 0 0 4px; }
+h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 24px 0 8px; }
+.meta { color: var(--muted); font-size: 12px; }
+.err { color: var(--bad); }
+.totals { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; }
+.totals div { min-width: 90px; }
+.totals b { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+.replica { border-top: 1px solid var(--line); padding: 8px 0; display: grid; grid-template-columns: minmax(120px, 200px) 1fr; gap: 4px 16px; }
+.replica .name { font-weight: 600; overflow-wrap: anywhere; }
+.replica .name small { display: block; font-weight: 400; color: var(--muted); }
+.down .name { color: var(--bad); }
+.bar { display: grid; grid-template-columns: 70px 1fr minmax(90px, auto); gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+.track { height: 10px; background: var(--track); border-radius: 5px; overflow: hidden; }
+.fill { height: 100%; }
+.kv .fill { background: var(--kv); }
+.slots .fill { background: var(--slots); }
+.over .fill { background: var(--bad); }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 4px 8px; border-top: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; font-size: 12px; }
+td.n, th.n { text-align: right; }
+.empty { color: var(--muted); }
+.scroll { overflow-x: auto; }
+.tree td:first-child { white-space: nowrap; font-family: ui-monospace, monospace; font-size: 12px; }
+.status-Failed { color: var(--bad); }
+.status-Cancelled { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+<h1>luftpause</h1>
+<div class="meta" id="meta">loading…</div>
+<div class="totals" id="totals"></div>
+<h2>Replicas</h2>
+<div id="replicas"></div>
+<h2>Held turns</h2>
+<div class="scroll" id="held"></div>
+<h2>Runs by phase</h2>
+<div class="scroll" id="runs"></div>
+<section id="tree-section" hidden>
+<h2>Run tree</h2>
+<div class="meta" id="tree-meta"></div>
+<div class="scroll" id="tree"></div>
+</section>
+</main>
+<script>
+"use strict";
+const runtime = new URLSearchParams(location.search).get("runtime");
+
+function el(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") node.className = v; else node.setAttribute(k, v);
+  }
+  for (const child of children) node.append(child instanceof Node ? child : String(child));
+  return node;
+}
+
+function fmt(n) { return Number(n).toLocaleString(); }
+function secs(s) { return s < 60 ? s.toFixed(1) + " s" : (s / 60).toFixed(1) + " min"; }
+
+function bar(label, kind, used, limit) {
+  const known = limit !== null && limit > 0;
+  const pct = known ? Math.min(100, (used / limit) * 100) : 0;
+  const over = known && used > limit;
+  const fill = el("div", { class: "fill" });
+  fill.style.width = pct + "%";
+  return el("div", { class: "bar " + kind + (over ? " over" : "") },
+    label, el("div", { class: "track" }, fill), known ? fmt(used) + " / " + fmt(limit) : fmt(used) + " / unknown");
+}
+
+function table(headers, rows, numeric) {
+  if (rows.length === 0) return el("div", { class: "empty" }, "none");
+  return el("table", {},
+    el("tr", {}, ...headers.map((h, i) => el("th", numeric[i] ? { class: "n" } : {}, h))),
+    ...rows.map(r => el("tr", {}, ...r.map((c, i) => c instanceof Node ? c : el("td", numeric[i] ? { class: "n" } : {}, c)))));
+}
+
+function renderScheduler(s) {
+  document.getElementById("meta").textContent = "scheduler at " + new Date(s.atUnixMs).toLocaleTimeString();
+  const t = s.totals;
+  document.getElementById("totals").replaceChildren(...[
+    ["replicas", t.healthyReplicas + " / " + t.replicas],
+    ["in flight", t.inFlight], ["held", t.held], ["runs", t.runs],
+  ].map(([k, v]) => el("div", {}, el("b", {}, v), k)));
+
+  const replicas = document.getElementById("replicas");
+  replicas.replaceChildren(...(s.replicas.length === 0
+    ? [el("div", { class: "empty" }, "no replicas configured")]
+    : s.replicas.map(r => el("div", { class: "replica" + (r.healthy ? "" : " down") },
+        el("div", { class: "name" }, r.id, el("small", {}, r.class + (r.healthy ? "" : " · unhealthy") + " · " + r.activeRuns + " active runs")),
+        el("div", {},
+          bar("KV", "kv", r.kvInFlight, r.kvPool),
+          bar("in flight", "slots", r.inFlight, r.capacity))))));
+
+  document.getElementById("held").replaceChildren(table(
+    ["class", "caller", "turns", "oldest wait"],
+    s.held.map(h => [h.class, h.caller || "(none)", h.count, secs(h.oldestWaitSeconds)]),
+    [false, false, true, true]));
+
+  document.getElementById("runs").replaceChildren(table(
+    ["phase", "class", "runs"],
+    s.runs.map(r => [r.phase, r.class, r.count]),
+    [false, false, true]));
+}
+
+function treeRows(nodes, depth, rows) {
+  for (const n of nodes) {
+    const name = el("td", {}, "  ".repeat(depth) + (depth ? "└ " : "") + n.handle);
+    rows.push([name, el("td", { class: "status-" + n.status }, n.status), n.class, secs(n.elapsedSeconds),
+      fmt(n.own.turns), fmt(n.subtree.turns),
+      fmt(n.subtree.toolCalls) + (n.subtree.failedToolCalls ? " (" + n.subtree.failedToolCalls + " failed)" : ""),
+      fmt(n.subtree.promptTokens), fmt(n.subtree.completionTokens),
+      secs(n.subtree.turnSeconds), secs(n.subtree.toolSeconds)]);
+    treeRows(n.children, depth + 1, rows);
+  }
+  return rows;
+}
+
+function renderRuntime(r) {
+  document.getElementById("tree-meta").textContent = runtime + " at " + new Date(r.atUnixMs).toLocaleTimeString() + " · subtree totals include descendants";
+  document.getElementById("tree").replaceChildren(table(
+    ["run", "status", "class", "elapsed", "own turns", "turns", "tool calls", "prompt tok", "completion tok", "turn time", "tool time"],
+    treeRows(r.roots, 0, []),
+    [false, false, false, true, true, true, true, true, true, true, true]));
+  document.getElementById("tree").firstChild.classList.add("tree");
+}
+
+async function poll(url, render, metaId) {
+  try {
+    const response = await fetch(url, { cache: "no-store" });
+    if (!response.ok) throw new Error(url + " → HTTP " + response.status);
+    render(await response.json());
+  } catch (e) {
+    const meta = document.getElementById(metaId);
+    meta.textContent = String(e.message || e);
+    meta.classList.add("err");
+    return;
+  }
+  document.getElementById(metaId).classList.remove("err");
+}
+
+function tick() {
+  poll("status", renderScheduler, "meta");
+  if (runtime) poll(runtime.replace(/\/$/, "") + "/status", renderRuntime, "tree-meta");
+}
+
+if (runtime) document.getElementById("tree-section").hidden = false;
+tick();
+setInterval(tick, 2000);
+</script>
+</body>
+</html>
