@@ -53,11 +53,14 @@ appears when the engines are saturated, which is when it matters.
 
 ## Two ways in
 
-- **MCP runtime** — an agent such as Claude Code connects over MCP and gets
-  `spawn` / `await`. luftpause runs each sub-agent's loop: LLM turns on the pool,
-  tool calls to upstream MCP servers.
 - **OpenAI-compatible proxy** — an agent that keeps its own loop points its
-  `base_url` at luftpause and gets the same admission and routing.
+  `base_url` at luftpause. It sends `x-luftpause-run-id` per run and, optionally,
+  `x-luftpause-class` and `x-luftpause-caller`; every tool call in its loop is then
+  a scheduled await.
+- **MCP runtime** — an agent such as Claude Code connects over MCP and gets
+  `spawn` / `await`. luftpause runs each sub-agent's loop through the same proxy:
+  LLM turns on the pool, tool calls to upstream MCP servers, the MCP session as the
+  caller, and a journal so the runs outlive the process.
 
 ## Architecture
 
@@ -68,7 +71,7 @@ flowchart LR
     own["Agents with<br/>their own loop"]
 
     subgraph lp["luftpause"]
-        runtime["<b>runtime</b> · .NET<br/>spawn · await<br/>sub-agent loops"]
+        runtime["<b>runtime</b> · .NET<br/>spawn · await · journal<br/>sub-agent loops"]
         dp["<b>dataplane</b> · Rust<br/>OpenAI-compatible proxy"]
         sched["<b>scheduler</b> · .NET<br/>decide(state, event)"]
     end
@@ -87,15 +90,18 @@ flowchart LR
     runtime -- "tool calls" --> tools
     runtime -- "LLM turns" --> dp
     dp -- "turns" --> pool
-    sched <-- "Admit · Report" --> dp
-    sched -. "health · load" .-> pool
+    sched <-- "Admit · Report · run ended" --> dp
+    sched -. "health · load · KV pool" .-> pool
 ```
 
 - **runtime** (`runtime/`) — MCP server. Each spawned run is a .NET `Task` running
-  the agent loop; tool calls go to the configured MCP servers.
+  the agent loop; tool calls go to the configured MCP servers. Every run is
+  journaled to `runs.jsonl` and resumed on restart; a finished run is reported to
+  the dataplane (`DELETE /v1/runs/{id}`) so the scheduler forgets it at once.
 - **dataplane** (`dataplane/crates/dataplane`) — tokio/axum proxy. Resolves the
-  run (header or tool-call ids), asks the scheduler where the turn goes, streams
-  the engine's response through unchanged.
+  run (header or tool-call ids), reads the class and caller headers, asks the
+  scheduler where the turn goes, streams the engine's response through unchanged
+  and reports first token, usage and finish reason.
 - **scheduler** (`scheduler/`) — the decision core is pure functions over
   immutable state (`Luftpause.Scheduling`); the gRPC host executes the actions.
 - **test kit** — `fake-engine` (OpenAI + `/classify` with simulated latency),
@@ -135,7 +141,7 @@ budget is spent. What is left:
 | Tool-call budget | 8 per run, set per run with `spawn(maxToolCalls)` | Once spent, the model is offered no tools and must answer; this also bounds a run's turns at budget + 1 | `runtime/…/LuftpauseTools.cs` |
 | `await` timeout | 60 s by default, 600 s at most | How long one `await` call waits before returning the runs' current state; 60 s stays under MCP clients' own per-request limit (Claude Code's is 60 s over HTTP) | `runtime/…/LuftpauseTools.cs` |
 | Turn timeout | 10 min | A turn whose completion is never reported (dataplane crashed mid-turn) is dropped and its slot freed | `scheduler/…/Expiry.cs` |
-| Run idle expiry | 30 min | A run with no turn for this long is forgotten; its next turn starts without affinity. Agents with their own loop never say they are done, so their state needs an end | `scheduler/…/Expiry.cs` |
+| Run idle expiry | 30 min | A run with no turn for this long is forgotten; its next turn starts without affinity. The runtime reports its sub-agents' ends; agents with their own loop never say they are done, so their state needs an end | `scheduler/…/Expiry.cs` |
 | Probe period | 2 s | Engine health and load (`/metrics`) are read this often; admission follows engine load with this delay; also the probe timeout | `scheduler/…/Probing.cs` |
 | Clock tick | 1 s | Drives the two expiries above | `scheduler/…/Clock.cs` |
 | Runtime → dataplane timeout | 10 min | Longest a single turn may take, queue wait included, before the run fails; the same as the OpenAI and Anthropic clients' default | `runtime/…/Program.cs` |
