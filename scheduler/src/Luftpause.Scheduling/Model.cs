@@ -16,11 +16,16 @@ public sealed record Replica(
     public bool Serves(string model) => Models is not { Length: > 0 } || Models.Contains(model, StringComparer.Ordinal);
 }
 
-public sealed record Turn(string TurnId, string RunId, string ReplicaId, long StartedUnixMs, int KvTokens = 0, int RequestBytes = 0, string Caller = "");
+public sealed record Turn(string TurnId, string RunId, string ReplicaId, long StartedUnixMs, int KvTokens = 0, int RequestBytes = 0, string Caller = "", string Model = "");
+
+public sealed record UsageKey(string ReplicaId, string Model);
 
 public sealed record ReplicaUsage(long PromptTokens, long RequestBytes, long CompletionTokens, int Turns)
 {
     public static readonly ReplicaUsage None = new(0, 0, 0, 0);
+
+    public ReplicaUsage Plus(ReplicaUsage other) =>
+        new(PromptTokens + other.PromptTokens, RequestBytes + other.RequestBytes, CompletionTokens + other.CompletionTokens, Turns + other.Turns);
 }
 
 public abstract record RunPhase;
@@ -51,7 +56,7 @@ public sealed record SchedulerState(
     ImmutableHashSet<string> Unhealthy,
     ImmutableDictionary<string, int> Capacity,
     ImmutableDictionary<string, int> KvPool,
-    ImmutableDictionary<string, ReplicaUsage> Usage)
+    ImmutableDictionary<UsageKey, ReplicaUsage> Usage)
 {
     public static SchedulerState Initial(IEnumerable<Replica> replicas)
     {
@@ -66,7 +71,7 @@ public sealed record SchedulerState(
             ImmutableHashSet<string>.Empty,
             ImmutableDictionary<string, int>.Empty,
             ImmutableDictionary<string, int>.Empty,
-            ImmutableDictionary<string, ReplicaUsage>.Empty);
+            ImmutableDictionary<UsageKey, ReplicaUsage>.Empty);
     }
 
     public int InFlightOn(string replicaId) => InFlight.GetValueOrDefault(replicaId);
