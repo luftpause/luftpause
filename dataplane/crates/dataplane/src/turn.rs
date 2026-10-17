@@ -29,6 +29,7 @@ pub struct TurnContext {
 pub struct ObservedBody {
     upstream: Upstream,
     upstream_done: bool,
+    accepted: bool,
     format: Format,
     held: Vec<u8>,
     observer: Option<Observer>,
@@ -37,10 +38,11 @@ pub struct ObservedBody {
 }
 
 impl ObservedBody {
-    pub fn new(upstream: Upstream, format: Format, turn: TurnContext) -> Self {
+    pub fn new(upstream: Upstream, accepted: bool, format: Format, turn: TurnContext) -> Self {
         Self {
             upstream,
             upstream_done: false,
+            accepted,
             format,
             held: Vec::new(),
             observer: Some(Observer::new(format)),
@@ -73,10 +75,11 @@ impl ObservedBody {
         }
     }
 
-    fn finish(&mut self, failed: bool) {
+    fn finish(&mut self, broken: bool) {
         let Some(observer) = self.observer.take() else {
             return;
         };
+        let failed = broken || !self.accepted;
         let outcome = observer.finish();
         self.remember_tool_calls(&outcome.tool_call_ids);
         if self.format == Format::Json && !failed {

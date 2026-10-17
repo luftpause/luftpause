@@ -159,6 +159,25 @@ flowchart LR
 | Run identity | `x-luftpause-run-id`, or the `tool_call_id`s an agent echoes back |
 | Single-pass engines | `POST /v1/decide` (vLLM `/classify` shape) on separate replicas, outside run state |
 
+## Failure semantics
+
+What happens to a turn through the dataplane (`/v1/chat/completions`, `/v1/decide`)
+when something fails. Error bodies are `{"error": {"message": "..."}}`; every response
+except the scheduler-unreachable one carries `x-luftpause-run-id`. A failed turn frees
+its slot at once and leaves its run idle, never paused on a tool, so a retry is
+admitted like any next turn of that run. Retrying with the same `x-luftpause-run-id`
+keeps the run's affinity and fairness standing.
+
+| Case | What the client sees | What luftpause does | What an own-loop agent should do |
+|---|---|---|---|
+| Client disconnects while its turn is held | nothing (it left) | cancels the scheduler call; the turn leaves the wait queue (`TurnAbandoned`), no engine request is made; if it was being routed at that moment, the turn is reported failed and its slot freed | if it gave up on a client-side timeout, send the turn again with the same run id: it never ran |
+| Client disconnects mid-stream | nothing (it left) | closes the engine request, which stops generation; reports the turn failed | send the turn again with the same run id; the partial reply is not kept anywhere |
+| Engine unreachable | `502`, `engine <replica>: <error>`; at once on a refused connection, after the OS connect timeout on a host that does not answer | reports the turn started and failed; the replica stays in rotation until its health probe fails (2 s period) | retry with the same run id after a short pause; the retry may go to the same replica until the probe marks it down |
+| Engine fails mid-stream | `200`, the chunks sent so far, then the connection closes without the final chunk or `[DONE]` | reports the turn failed | treat the reply as lost, discard it, retry the whole turn with the same run id |
+| Engine refuses at once (429, 5xx) | the engine's status and body, unchanged, with its `Retry-After` | reports the turn started and failed | on 429, wait `Retry-After` (else about 1 s) and retry with the same run id; on 5xx, retry a few times with backoff, then give up |
+| Unknown model | `404`, `no Generative replica serves model '<model>'` | refuses before queueing; no engine request, no turn recorded | give up: fix the model name or the endpoint config; a retry gets the same answer |
+| Scheduler unreachable | `503`, `scheduler: <error>`, within 2 s, no run id header | no engine request; nothing is recorded | retry with the run id it sent, with backoff; without one, the retry starts a new run unless its tool results name the old one |
+
 ## Constants
 
 luftpause keeps few fixed numbers. There is no queue deadline and no turn limit: a

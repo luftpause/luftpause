@@ -1,10 +1,12 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use axum::Router;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use axum::routing::{delete, post};
 use serde_json::{Value, json};
 use tonic::transport::Channel;
 use uuid::Uuid;
@@ -30,6 +32,14 @@ pub struct AppState {
     pub http: reqwest::Client,
     pub sink: EventSink,
     pub runs: Arc<RunIndex>,
+}
+
+pub fn router(state: AppState) -> Router {
+    Router::new()
+        .route("/v1/chat/completions", post(chat_completions))
+        .route("/v1/decide", post(decide))
+        .route("/v1/runs/{run_id}", delete(end_run))
+        .with_state(state)
 }
 
 pub async fn chat_completions(State(app): State<AppState>, headers: HeaderMap, body: Bytes) -> Response {
@@ -140,6 +150,7 @@ async fn forward(app: &AppState, ids: TurnIds, route: Route, body: Bytes, timing
         .unwrap_or_else(|| HeaderValue::from_static("application/json"));
     let format = Format::from_content_type(content_type.to_str().unwrap_or_default());
     let replica = HeaderValue::from_str(&route.replica_id).ok();
+    let retry_after = upstream.headers().get(header::RETRY_AFTER).cloned();
     let turn = TurnContext {
         ids,
         replica_id: route.replica_id,
@@ -147,11 +158,14 @@ async fn forward(app: &AppState, ids: TurnIds, route: Route, body: Bytes, timing
         sink: app.sink.clone(),
         runs: app.runs.clone(),
     };
-    let body = ObservedBody::new(Box::pin(upstream.bytes_stream()), format, turn);
+    let body = ObservedBody::new(Box::pin(upstream.bytes_stream()), status.is_success(), format, turn);
 
     let mut builder = Response::builder().status(status).header(header::CONTENT_TYPE, content_type);
     if let Some(replica) = replica {
         builder = builder.header(REPLICA_HEADER, replica);
+    }
+    if let Some(retry_after) = retry_after {
+        builder = builder.header(header::RETRY_AFTER, retry_after);
     }
     builder
         .body(Body::from_stream(body))
