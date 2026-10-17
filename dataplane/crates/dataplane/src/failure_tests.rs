@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::{Body, Bytes};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::routing::post;
 use futures_util::{StreamExt, stream};
 use serde_json::{Value, json};
@@ -17,6 +17,7 @@ use tonic::transport::Endpoint;
 use tonic::transport::server::TcpIncoming;
 use tonic::{Request, Response, Status, Streaming};
 
+use crate::auth;
 use crate::events::EventSink;
 use crate::proto::decision::Outcome;
 use crate::proto::scheduler_client::SchedulerClient;
@@ -32,6 +33,7 @@ const TOKEN: &[u8] = b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\
 #[derive(Clone)]
 enum Answer {
     Route(String),
+    RouteWithKey(String, &'static str),
     Refuse(&'static str),
     Hold,
 }
@@ -58,6 +60,12 @@ impl Scheduler for Stub {
             Answer::Route(base_url) => Outcome::Route(Route {
                 replica_id: "r1".to_owned(),
                 base_url: base_url.clone(),
+                ..Default::default()
+            }),
+            Answer::RouteWithKey(base_url, authorization) => Outcome::Route(Route {
+                replica_id: "r1".to_owned(),
+                base_url: base_url.clone(),
+                authorization: (*authorization).to_owned(),
                 ..Default::default()
             }),
             Answer::Refuse(reason) => Outcome::Refuse(Refuse { reason: (*reason).to_owned() }),
@@ -112,6 +120,10 @@ struct Dataplane {
 }
 
 async fn dataplane(scheduler_url: &str) -> Dataplane {
+    protected_dataplane(scheduler_url, None).await
+}
+
+async fn protected_dataplane(scheduler_url: &str, token: Option<&str>) -> Dataplane {
     let channel = Endpoint::from_shared(scheduler_url.to_owned()).expect("scheduler url").connect_lazy();
     let (events_tx, events) = mpsc::unbounded_channel();
     let state = AppState {
@@ -120,7 +132,7 @@ async fn dataplane(scheduler_url: &str) -> Dataplane {
         sink: EventSink::new(events_tx),
         runs: Arc::new(RunIndex::new()),
     };
-    Dataplane { url: serve(proxy::router(state)).await, events }
+    Dataplane { url: serve(auth::protect(proxy::router(state), token)).await, events }
 }
 
 impl Dataplane {
@@ -321,4 +333,32 @@ async fn an_unreachable_scheduler_is_a_503() {
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert!(error_message(response).await.starts_with("scheduler: "));
     assert_eq!(dataplane.events_through_completion().await, ["completed failed=true"]);
+}
+
+#[tokio::test]
+async fn the_clients_authorization_never_reaches_the_engine_only_the_routes_key_does() {
+    let (seen_tx, mut seen) = mpsc::unbounded_channel();
+    let engine = serve(Router::new().route(
+        "/v1/chat/completions",
+        post(move |headers: HeaderMap| {
+            let keys: Vec<_> = headers.get_all(header::AUTHORIZATION).iter().map(|v| v.to_str().expect("ascii").to_owned()).collect();
+            let _ = seen_tx.send(keys);
+            async { "{}" }
+        }),
+    ))
+    .await;
+    let scheduler = scheduler(Answer::RouteWithKey(engine, "Bearer engine-key")).await;
+    let dataplane = protected_dataplane(&scheduler.url, Some("client-token")).await;
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/v1/chat/completions", dataplane.url))
+        .header(header::AUTHORIZATION, "Bearer client-token")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(chat_request().to_string())
+        .send()
+        .await
+        .expect("dataplane answers");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(timeout(WAIT, seen.recv()).await.expect("engine called").expect("headers"), ["Bearer engine-key"]);
 }

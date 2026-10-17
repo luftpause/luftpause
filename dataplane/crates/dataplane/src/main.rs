@@ -1,3 +1,4 @@
+mod auth;
 mod events;
 #[cfg(test)]
 mod failure_tests;
@@ -43,7 +44,8 @@ async fn main() {
         sink: EventSink::new(events_tx),
         runs: Arc::new(run_identity::RunIndex::new()),
     };
-    let router = proxy::router(state);
+    let token = env::var("LUFTPAUSE_TOKEN").ok().filter(|token| !token.is_empty());
+    let router = auth::protect(proxy::router(state), token.as_deref());
 
     let listener = tokio::net::TcpListener::bind(&listen).await.expect("bind");
     eprintln!("dataplane listening on {listen}, scheduler {scheduler_url}");

@@ -25,6 +25,7 @@ services:
     command: ["dataplane"]
     environment:
       SCHEDULER_URL: http://scheduler:5000
+      LUFTPAUSE_TOKEN: ${LUFTPAUSE_TOKEN:-}
     ports: ["8080:8080"]
     depends_on: [scheduler]
 
@@ -33,6 +34,7 @@ services:
     image: luftpause-runtime
     environment:
       DataPlane__Url: http://dataplane:8080/
+      LUFTPAUSE_TOKEN: ${LUFTPAUSE_TOKEN:-}
       Runtime__Model: fake
       Runtime__DecideModel: fake
       Tools__Servers__0__Name: fake-tools

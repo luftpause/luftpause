@@ -54,6 +54,34 @@ public class LlmClientTests
     private static readonly JsonArray Tools = [new JsonObject { ["type"] = "function", ["function"] = new JsonObject { ["name"] = "lookup" } }];
 
     [Fact]
+    public async Task Every_dataplane_call_carries_the_bearer_once_authorized()
+    {
+        var engine = new Scripted(HttpStatusCode.OK);
+        var http = new HttpClient(engine) { BaseAddress = new Uri("http://dataplane/") };
+        BearerAuth.Authorize(http, "s3cret");
+        var client = new LlmClient(http);
+
+        await client.ChatAsync("run-1", Spec, [], [], CancellationToken.None);
+        Assert.Equal("Bearer s3cret", engine.LastRequest?.Headers.Authorization?.ToString());
+
+        await client.DecideAsync("fake", "input", CancellationToken.None);
+        Assert.Equal("Bearer s3cret", engine.LastRequest?.Headers.Authorization?.ToString());
+
+        await client.EndRunAsync("run-1", CancellationToken.None);
+        Assert.Equal("Bearer s3cret", engine.LastRequest?.Headers.Authorization?.ToString());
+    }
+
+    [Fact]
+    public async Task No_bearer_is_sent_unless_authorized()
+    {
+        var (client, engine) = Client(HttpStatusCode.OK);
+
+        await client.ChatAsync("run-1", Spec, [], [], CancellationToken.None);
+
+        Assert.Null(engine.LastRequest?.Headers.Authorization);
+    }
+
+    [Fact]
     public async Task One_tool_call_per_reply_unless_the_run_allows_parallel_calls()
     {
         var (client, engine) = Client(HttpStatusCode.OK);
