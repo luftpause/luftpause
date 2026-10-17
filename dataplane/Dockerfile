@@ -14,4 +14,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
  && cp target/release/dataplane target/release/fake-engine target/release/fake-mcp /out/
 
 FROM debian:bookworm-slim
+ARG VERSION=dev
+LABEL org.opencontainers.image.source=https://github.com/luftpause/luftpause \n      org.opencontainers.image.version=$VERSION \n      org.opencontainers.image.licenses=Elastic-2.0
 COPY --from=build /out/ /usr/local/bin/

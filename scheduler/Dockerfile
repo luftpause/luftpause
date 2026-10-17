@@ -5,6 +5,8 @@ COPY scheduler ./scheduler
 RUN dotnet publish scheduler/src/Luftpause.Scheduler -c Release -o /out
 
 FROM mcr.microsoft.com/dotnet/aspnet:10.0
+ARG VERSION=dev
+LABEL org.opencontainers.image.source=https://github.com/luftpause/luftpause \n      org.opencontainers.image.version=$VERSION \n      org.opencontainers.image.licenses=Elastic-2.0
 WORKDIR /app
 ENV ASPNETCORE_HTTP_PORTS=
 COPY --from=build /out .
