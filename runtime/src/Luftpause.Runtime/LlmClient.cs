@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json.Nodes;
@@ -27,11 +28,14 @@ public sealed class LlmClient(HttpClient http)
                 body["parallel_tool_calls"] = false;
         }
 
+        using var activity = Tracing.Source.StartActivity($"chat {spec.Model}", ActivityKind.Client, default(ActivityContext), GenAiTags.ChatRequest(spec));
         var root = await PostChatAsync(runId, spec.ServiceClass, spec.Caller, body, cancel);
         var choice = root?["choices"]?[0];
         var message = choice?["message"];
         var calls = message?["tool_calls"]?.AsArray().OfType<JsonObject>().ToList() ?? [];
-        return new LlmReply(message?["content"]?.GetValue<string>(), calls, choice?["finish_reason"]?.GetValue<string>(), Usage(root?["usage"]));
+        var reply = new LlmReply(message?["content"]?.GetValue<string>(), calls, choice?["finish_reason"]?.GetValue<string>(), Usage(root?["usage"]));
+        activity?.SetTags(GenAiTags.ChatResponse(reply));
+        return reply;
     }
 
     public async Task<IReadOnlyList<(string Token, double Logprob)>> FirstTokenAlternativesAsync(

@@ -11,6 +11,7 @@ var stateDir = builder.Configuration["Runtime:StateDir"] ?? "state";
 Directory.CreateDirectory(stateDir);
 var journalPath = Path.Combine(stateDir, "runs.jsonl");
 
+builder.Services.AddLuftpauseTracing(builder.Configuration);
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(defaults);
 builder.Services.AddHttpClient<LlmClient>(http =>

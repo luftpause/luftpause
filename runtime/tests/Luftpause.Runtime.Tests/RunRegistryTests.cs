@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -72,6 +74,30 @@ public sealed class RunRegistryTests : IDisposable
         journal!.Dispose();
 
         Assert.Equal([typeof(RunSpawned), typeof(RunTurned), typeof(RunFinished)], RunJournal.Replay(path).Select(r => r.GetType()));
+    }
+
+    [Fact]
+    public void A_child_run_span_is_a_child_of_its_parent_run_span()
+    {
+        var started = new ConcurrentDictionary<string, Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = s => s.Name == Tracing.SourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStarted = a =>
+            {
+                if (a.GetTagItem("gen_ai.agent.id") is string handle)
+                    started[handle] = a;
+            },
+        };
+        ActivitySource.AddActivityListener(listener);
+        var registry = Registry();
+
+        var parent = registry.Spawn(Spec);
+        var child = registry.Spawn(Spec, parent.Handle);
+
+        Assert.Equal(started[parent.Handle].TraceId, started[child.Handle].TraceId);
+        Assert.Equal(started[parent.Handle].SpanId, started[child.Handle].ParentSpanId);
     }
 
     [Fact]

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json.Nodes;
 
 namespace Luftpause.Runtime;
@@ -26,6 +27,7 @@ public sealed class RunRecord(string handle, RunSpec spec, DateTimeOffset starte
     public CancellationTokenSource Cancel { get; } = cancel;
     public Task<RunOutcome> Completion { get; set; } = Task.FromResult(new RunOutcome(RunStatus.Running, null, null));
     public DateTimeOffset? Finished { get; set; }
+    public ActivityContext Trace { get; set; }
 
     public RunWork Work
     {

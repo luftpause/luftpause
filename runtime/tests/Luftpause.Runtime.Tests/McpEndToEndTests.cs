@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
@@ -68,10 +70,23 @@ public sealed class McpEndToEndTests : IAsyncLifetime
         await app.StartAsync();
     }
 
-    private async Task ConnectAsync(string protocolVersion) =>
+    private sealed class TraceParent(string value) : DelegatingHandler(new SocketsHttpHandler())
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancel)
+        {
+            request.Headers.Remove("traceparent");
+            request.Headers.Add("traceparent", value);
+            return base.SendAsync(request, cancel);
+        }
+    }
+
+    private async Task ConnectAsync(string protocolVersion, HttpClient? http = null)
+    {
+        var options = new HttpClientTransportOptions { Endpoint = new Uri($"{app!.Urls.Single()}/mcp") };
         client = await McpClient.CreateAsync(
-            new HttpClientTransport(new HttpClientTransportOptions { Endpoint = new Uri($"{app!.Urls.Single()}/mcp") }),
+            http is null ? new HttpClientTransport(options) : new HttpClientTransport(options, http, ownsHttpClient: true),
             new McpClientOptions { ProtocolVersion = protocolVersion });
+    }
 
     public async Task DisposeAsync()
     {
@@ -112,6 +127,36 @@ public sealed class McpEndToEndTests : IAsyncLifetime
         var start = await loop.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
         Assert.Null(start.Spec.Caller);
+    }
+
+    [Theory]
+    [InlineData("2025-11-25")]
+    [InlineData("2026-07-28")]
+    public async Task The_traceparent_on_the_spawn_request_parents_the_run_span(string protocolVersion)
+    {
+        var traceId = ActivityTraceId.CreateRandom();
+        var callerSpan = ActivitySpanId.CreateRandom();
+        var runs = new ConcurrentQueue<Activity>();
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = s => s.Name is "Microsoft.AspNetCore" or Tracing.SourceName,
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+            ActivityStarted = a =>
+            {
+                if (a.OperationName == "invoke_agent" && a.TraceId == traceId)
+                    runs.Enqueue(a);
+            },
+        };
+        ActivitySource.AddActivityListener(listener);
+
+        await ConnectAsync(protocolVersion, new HttpClient(new TraceParent($"00-{traceId}-{callerSpan}-01")));
+        var handle = await SpawnAsync();
+        await loop.Started.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        var run = Assert.Single(runs);
+        Assert.Equal(handle, run.GetTagItem("gen_ai.agent.id"));
+        Assert.NotEqual(callerSpan, run.ParentSpanId);
+        Assert.Equal(traceId, run.TraceId);
     }
 
     [Theory]

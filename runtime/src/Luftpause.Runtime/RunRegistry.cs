@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Immutable;
+using System.Diagnostics;
 
 namespace Luftpause.Runtime;
 
@@ -16,7 +17,7 @@ public sealed class RunRegistry(
         var record = new RunRecord($"run-{Guid.NewGuid():N}", spec, time.GetUtcNow(), new CancellationTokenSource(), parent);
         journal.Append(new RunSpawned(record.Handle, spec, record.Started, parent));
         Adopt(record);
-        Start(record);
+        Start(record, parent is null ? Activity.Current?.Context ?? default : runs[parent].Trace);
         return record;
     }
 
@@ -27,7 +28,7 @@ public sealed class RunRegistry(
             var record = replayed.Record();
             Adopt(record);
             if (replayed.Finished is null)
-                Start(record);
+                Start(record, record.Parent is { } parent && runs.TryGetValue(parent, out var parentRecord) ? parentRecord.Trace : default);
             else
                 runs[record.Handle] = record;
         }
@@ -97,15 +98,20 @@ public sealed class RunRegistry(
             children.AddOrUpdate(parent, _ => [record.Handle], (_, siblings) => siblings.Add(record.Handle));
     }
 
-    private void Start(RunRecord record)
+    private void Start(RunRecord record, ActivityContext parentTrace)
     {
         runs[record.Handle] = record;
-        record.Completion = ExecuteAsync(record);
+        record.Completion = ExecuteAsync(record, parentTrace);
     }
 
-    private async Task<RunOutcome> ExecuteAsync(RunRecord record)
+    private async Task<RunOutcome> ExecuteAsync(RunRecord record, ActivityContext parentTrace)
     {
+        using var activity = Tracing.Source.StartActivity("invoke_agent", ActivityKind.Internal, parentTrace, GenAiTags.Run(record.Handle, record.Spec));
+        record.Trace = activity?.Context ?? default;
         var outcome = await OutcomeAsync(record);
+        activity?.SetTags(GenAiTags.RunOutcome(outcome));
+        if (outcome.Status == RunStatus.Failed)
+            activity?.SetStatus(ActivityStatusCode.Error, outcome.Error);
         var finishedAt = time.GetUtcNow();
         record.Finished = finishedAt;
         journal.Append(new RunFinished(record.Handle, outcome, finishedAt));

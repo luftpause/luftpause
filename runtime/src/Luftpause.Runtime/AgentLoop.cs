@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json.Nodes;
 
 namespace Luftpause.Runtime;
@@ -83,9 +84,12 @@ public sealed class AgentLoop(LlmClient llm, ToolCatalog tools, TimeProvider tim
     private async Task<ToolResult> CallReportedAsync(string runId, JsonObject call, CancellationToken cancel)
     {
         var tool = call["function"]?["name"]?.GetValue<string>() ?? "";
+        using var activity = Tracing.Source.StartActivity($"execute_tool {tool}", ActivityKind.Internal, default(ActivityContext), GenAiTags.Tool(call));
         var started = time.GetTimestamp();
         var text = await tools.CallAsync(call, cancel);
         var result = new ToolResult(text, text.StartsWith("Error:", StringComparison.Ordinal));
+        if (result.Failed)
+            activity?.SetStatus(ActivityStatusCode.Error, text[..Math.Min(text.Length, 200)]);
         log.LogInformation(
             "tool_call run={Run} tool={Tool} ms={Ms} failed={Failed} reason={Reason}",
             runId, tool, (long)time.GetElapsedTime(started).TotalMilliseconds, result.Failed,
