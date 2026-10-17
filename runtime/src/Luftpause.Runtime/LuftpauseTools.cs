@@ -66,10 +66,24 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         new { handle, cancelled = runs.Cancel(handle) };
 
     [McpServerTool(Name = "decide", ReadOnly = true), Description(
-        "One-pass typed decision from a single-pass model: returns labels with probabilities for the input.")]
-    public Task<string> Decide(
+        "One-pass typed decision: returns labels with probabilities for the input. " +
+        "Without labels, a single-pass model answers with its own label set. " +
+        "With labels, a generative model scores them by the logprob of its first answer token.")]
+    public async Task<string> Decide(
         [Description("Text or state to classify.")] string input,
-        [Description("Single-pass model; defaults to the runtime's decision model.")] string? model = null,
-        CancellationToken cancellationToken = default) =>
-        llm.DecideAsync(model ?? defaults.DecideModel ?? "", input, cancellationToken);
+        [Description("2 to 20 labels to choose from, each with a distinct first word; omit to use the single-pass model's labels.")] string[]? labels = null,
+        [Description("Model; defaults to the runtime's decision model without labels and its generative model with labels.")] string? model = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (labels is null)
+            return await llm.DecideAsync(model ?? defaults.DecideModel ?? "", input, cancellationToken);
+        try
+        {
+            return await LabelDecision.DecideAsync(llm, model ?? defaults.Model, input, labels, cancellationToken);
+        }
+        catch (Exception e) when (e is ArgumentException or InvalidOperationException)
+        {
+            throw new McpException(e.Message);
+        }
+    }
 }

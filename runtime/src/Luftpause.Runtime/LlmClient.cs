@@ -27,24 +27,48 @@ public sealed class LlmClient(HttpClient http)
                 body["parallel_tool_calls"] = false;
         }
 
+        var root = await PostChatAsync(runId, spec.ServiceClass, spec.Caller, body, cancel);
+        var choice = root?["choices"]?[0];
+        var message = choice?["message"];
+        var calls = message?["tool_calls"]?.AsArray().OfType<JsonObject>().ToList() ?? [];
+        return new LlmReply(message?["content"]?.GetValue<string>(), calls, choice?["finish_reason"]?.GetValue<string>(), Usage(root?["usage"]));
+    }
+
+    public async Task<IReadOnlyList<(string Token, double Logprob)>> FirstTokenAlternativesAsync(
+        string runId, string model, JsonArray messages, CancellationToken cancel)
+    {
+        var body = new JsonObject
+        {
+            ["model"] = model,
+            ["messages"] = messages.DeepClone(),
+            ["max_tokens"] = 1,
+            ["logprobs"] = true,
+            ["top_logprobs"] = 20,
+        };
+        var root = await PostChatAsync(runId, "interactive", null, body, cancel);
+        var alternatives = root?["choices"]?[0]?["logprobs"]?["content"]?[0]?["top_logprobs"]?.AsArray()
+            ?? throw new InvalidOperationException("chat turn reply has no top_logprobs for its first token");
+        return alternatives
+            .Select(a => (a!["token"]!.GetValue<string>(), a["logprob"]!.GetValue<double>()))
+            .ToList();
+    }
+
+    private async Task<JsonNode?> PostChatAsync(
+        string runId, string serviceClass, string? caller, JsonObject body, CancellationToken cancel)
+    {
         using var response = await SendAsync(() =>
         {
             var request = new HttpRequestMessage(HttpMethod.Post, "v1/chat/completions") { Content = JsonContent.Create(body) };
             request.Headers.Add("x-luftpause-run-id", runId);
-            request.Headers.Add("x-luftpause-class", spec.ServiceClass);
-            if (spec.Caller is { } caller)
+            request.Headers.Add("x-luftpause-class", serviceClass);
+            if (caller is not null)
                 request.Headers.Add("x-luftpause-caller", caller);
             return request;
         }, cancel);
         var text = await response.Content.ReadAsStringAsync(cancel);
         if (!response.IsSuccessStatusCode)
             throw new HttpRequestException($"chat turn failed: {(int)response.StatusCode} {text[..Math.Min(text.Length, 300)]}");
-
-        var root = JsonNode.Parse(text);
-        var choice = root?["choices"]?[0];
-        var message = choice?["message"];
-        var calls = message?["tool_calls"]?.AsArray().OfType<JsonObject>().ToList() ?? [];
-        return new LlmReply(message?["content"]?.GetValue<string>(), calls, choice?["finish_reason"]?.GetValue<string>(), Usage(root?["usage"]));
+        return JsonNode.Parse(text);
     }
 
     private static TokenUsage Usage(JsonNode? usage) =>
