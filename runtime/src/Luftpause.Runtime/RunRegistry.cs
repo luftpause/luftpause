@@ -62,12 +62,10 @@ public sealed class RunRegistry(
             reported = Report(Views(records), reported, progress);
             if (!Waiting(records, all) || deadline.IsCompleted)
                 break;
-            await Task.WhenAny([deadline, Task.Delay(ElapsedStep, time, cancel), .. signals, .. records.Select(r => r.Completion)]);
+            await Task.WhenAny([deadline, .. signals, .. records.Select(r => r.Completion)]);
         }
         return Views(records);
     }
-
-    private static readonly TimeSpan ElapsedStep = TimeSpan.FromSeconds(1);
 
     private List<RunView> Views(IReadOnlyList<RunRecord> records)
     {
@@ -86,9 +84,9 @@ public sealed class RunRegistry(
         return current;
     }
 
-    private sealed record RunMark(RunStatus Status, int Turns, int ToolCalls, long ElapsedSeconds)
+    private sealed record RunMark(RunStatus Status, int Turns, int ToolCalls)
     {
-        public static RunMark Of(RunView view) => new(view.Status, view.Turns, view.ToolCalls, (long)view.ElapsedSeconds);
+        public static RunMark Of(RunView view) => new(view.Status, view.Turns, view.ToolCalls);
     }
 
     private void Adopt(RunRecord record)
