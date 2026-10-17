@@ -12,7 +12,6 @@ public sealed record TurnRequested(
     bool Resumed,
     long AtUnixMs,
     ServiceClass Service = ServiceClass.Interactive,
-    int RequestBytes = 0,
     string Caller = "")
     : TurnEvent(TurnId, RunId, AtUnixMs);
 
@@ -38,6 +37,6 @@ public sealed record RunEnded(string RunId, long AtUnixMs) : SchedulerEvent(AtUn
 
 public sealed record ReplicaHealthChanged(string ReplicaId, bool Healthy, long AtUnixMs) : SchedulerEvent(AtUnixMs);
 
-public sealed record ReplicaLoadReported(string ReplicaId, int Running, int Waiting, long AtUnixMs, int? KvTokens = null) : SchedulerEvent(AtUnixMs);
+public sealed record ReplicaLoadReported(string ReplicaId, int Running, int Waiting, long AtUnixMs) : SchedulerEvent(AtUnixMs);
 
 public sealed record Tick(long AtUnixMs) : SchedulerEvent(AtUnixMs);

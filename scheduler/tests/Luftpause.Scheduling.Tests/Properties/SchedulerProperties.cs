@@ -20,28 +20,13 @@ public class SchedulerProperties
         });
 
     [Property(MaxTest = Cases, Arbitrary = new[] { typeof(CappedScenario) })]
-    public void Without_a_kv_pool_routing_never_takes_a_replica_past_its_capacity(Scenario scenario) =>
+    public void Routing_never_takes_a_replica_past_its_capacity(Scenario scenario) =>
         Invariant.HoldsAtEveryStep(scenario, step =>
         {
             var state = step.After.State;
-            if (!state.KvPool.IsEmpty)
-                return "a capped scenario reported a kv pool";
             return RoutedReplicas(step)
                 .Where(id => state.Capacity.TryGetValue(id, out var capacity) && state.InFlightOn(id) > capacity)
                 .Select(id => $"{id} has InFlight {state.InFlightOn(id)} over capacity {state.Capacity[id]}")
-                .FirstOrDefault();
-        });
-
-    [Property(MaxTest = Cases, Arbitrary = new[] { typeof(PooledScenario) })]
-    public void With_a_kv_pool_routing_never_overcommits_it_beyond_one_turn_on_an_idle_replica(Scenario scenario) =>
-        Invariant.HoldsAtEveryStep(scenario, step =>
-        {
-            var state = step.After.State;
-            return RoutedReplicas(step)
-                .Where(id => state.KvPool.ContainsKey(id))
-                .Select(id => (id, tokens: state.Turns.Values.Where(t => t.ReplicaId == id).Sum(t => t.KvTokens), pool: state.KvPool[id], inFlight: state.InFlightOn(id)))
-                .Where(r => r.tokens > r.pool && r.inFlight > 1)
-                .Select(r => $"{r.id} holds {r.tokens} kv tokens over pool {r.pool} across {r.inFlight} turns")
                 .FirstOrDefault();
         });
 
@@ -145,8 +130,6 @@ public class SchedulerProperties
             after.Replicas.SequenceEqual(before.Replicas) ? null : "replicas changed",
             after.Unhealthy.SetEquals(before.Unhealthy) ? null : "health changed",
             Same(before.Capacity, after.Capacity) ? null : "capacity changed",
-            Same(before.KvPool, after.KvPool) ? null : "kv pool changed",
-            Same(before.Usage, after.Usage) ? null : "usage changed",
         ];
         return differences.FirstOrDefault(d => d is not null);
     }

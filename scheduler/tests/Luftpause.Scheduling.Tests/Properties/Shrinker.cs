@@ -29,7 +29,6 @@ public static class Shrinker
             {
                 Replicas = scenario.Replicas[..^1],
                 Capacity = scenario.Capacity?[..^1],
-                KvPool = scenario.KvPool?[..^1],
             }];
 
     private static IEnumerable<Scenario> Simplifications(Scenario scenario) =>
@@ -66,7 +65,6 @@ public static class Shrinker
 
     private static IEnumerable<Command> SmallerNumbers(Command command) => command switch
     {
-        RequestTurn r when r.RequestBytes > 0 => [r with { RequestBytes = 0 }, r with { RequestBytes = r.RequestBytes / 2 }],
         CompleteTurn c when c.PromptTokens > 0 || c.CompletionTokens > 0 =>
             [c with { PromptTokens = 0, CompletionTokens = 0 }, c with { PromptTokens = c.PromptTokens / 2, CompletionTokens = c.CompletionTokens / 2 }],
         ReportLoad { Waiting: > 0 } l => [l with { Waiting = 0 }],

@@ -5,11 +5,7 @@ public static class EngineLoad
     public const int QueueBuffer = 2;
 
     public static SchedulerState Apply(SchedulerState state, ReplicaLoadReported load) =>
-        state with
-        {
-            Capacity = state.Capacity.SetItem(load.ReplicaId, Capacity(state, load)),
-            KvPool = load.KvTokens is { } kv ? state.KvPool.SetItem(load.ReplicaId, kv) : state.KvPool,
-        };
+        state with { Capacity = state.Capacity.SetItem(load.ReplicaId, Capacity(state, load)) };
 
     private static int Capacity(SchedulerState state, ReplicaLoadReported load)
     {

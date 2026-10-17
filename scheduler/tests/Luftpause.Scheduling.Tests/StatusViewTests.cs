@@ -24,7 +24,7 @@ public class StatusViewTests
     {
         var view = StatusView.From(SchedulerState.Initial([A]), 0);
 
-        Assert.Equal([new ReplicaStatus("a", EngineClass.Generative, true, 0, null, 0, null, 0)], view.Replicas);
+        Assert.Equal([new ReplicaStatus("a", EngineClass.Generative, true, 0, null, 0)], view.Replicas);
     }
 
     [Fact]
@@ -35,10 +35,9 @@ public class StatusViewTests
         {
             InFlight = initial.InFlight.SetItem("a", 2),
             Turns = initial.Turns
-                .Add("t1", new Turn("t1", "r1", "a", 0, KvTokens: 300))
-                .Add("t2", new Turn("t2", "r2", "a", 0, KvTokens: 200)),
+                .Add("t1", new Turn("t1", "r1", "a", 0))
+                .Add("t2", new Turn("t2", "r2", "a", 0)),
             Capacity = initial.Capacity.Add("a", 8),
-            KvPool = initial.KvPool.Add("a", 4096),
             Unhealthy = initial.Unhealthy.Add("s"),
         };
         state = state
@@ -50,8 +49,8 @@ public class StatusViewTests
 
         Assert.Equal(
             [
-                new ReplicaStatus("a", EngineClass.Generative, true, 2, 8, 500, 4096, 2),
-                new ReplicaStatus("s", EngineClass.SinglePass, false, 0, null, 0, null, 0),
+                new ReplicaStatus("a", EngineClass.Generative, true, 2, 8, 2),
+                new ReplicaStatus("s", EngineClass.SinglePass, false, 0, null, 0),
             ],
             view.Replicas);
         Assert.Equal(new StatusTotals(2, 1, 2, 0, 3), view.Totals);

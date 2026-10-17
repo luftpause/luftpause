@@ -1,7 +1,7 @@
 namespace Luftpause.Scheduling;
 
 public sealed record ReplicaStatus(
-    string Id, EngineClass Class, bool Healthy, int InFlight, int? Capacity, int KvInFlight, int? KvPool, int ActiveRuns);
+    string Id, EngineClass Class, bool Healthy, int InFlight, int? Capacity, int ActiveRuns);
 
 public sealed record HeldGroup(ServiceClass Class, string Caller, int Count, double OldestWaitSeconds);
 
@@ -39,8 +39,6 @@ public sealed record StatusView(
             state.IsHealthy(replica),
             state.InFlightOn(replica.Id),
             state.Capacity.TryGetValue(replica.Id, out var capacity) ? capacity : null,
-            KvBudget.InFlightTokens(state, replica.Id),
-            state.KvPool.TryGetValue(replica.Id, out var pool) ? pool : null,
             state.Runs.Values.Count(run => run.LastReplicaId == replica.Id && run.Phase is not Idle));
 
     private static IReadOnlyList<HeldGroup> HeldOf(SchedulerState state, long nowUnixMs) =>

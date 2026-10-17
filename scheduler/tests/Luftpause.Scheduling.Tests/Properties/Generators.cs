@@ -3,8 +3,6 @@ using FsCheck.Fluent;
 
 namespace Luftpause.Scheduling.Tests.Properties;
 
-public enum KvReports { Sometimes, Never }
-
 public static class Generators
 {
     private const int Runs = 4;
@@ -30,9 +28,8 @@ public static class Generators
         from service in Gen.Elements(ServiceClass.Interactive, ServiceClass.Batch)
         from model in Gen.Elements("m1", "m2")
         from caller in Gen.Elements("c0", "c1", "c2")
-        from bytes in Gen.Choose(0, 8000)
         from resumed in Gen.Frequency((3, Gen.Constant(false)), (1, Gen.Constant(true)))
-        select (Command)new RequestTurn(advance, run, engine, service, model, caller, bytes, resumed);
+        select (Command)new RequestTurn(advance, run, engine, service, model, caller, resumed);
 
     private static readonly Gen<Command> Complete =
         from advance in Advance
@@ -48,15 +45,12 @@ public static class Generators
         from held in Gen.Elements(true, false)
         select (Command)new AbandonTurn(advance, pick, held);
 
-    private static Gen<Command> Load(KvReports kv) =>
+    private static readonly Gen<Command> Load =
         from advance in Advance
         from replica in Gen.Choose(0, 2)
         from running in Gen.Choose(0, 6)
         from waiting in Gen.Choose(0, 6)
-        from tokens in kv == KvReports.Never
-            ? Gen.Constant<int?>(null)
-            : Gen.Frequency((1, Gen.Constant<int?>(null)), (1, Gen.Choose(200, 4000).Select(t => (int?)t)))
-        select (Command)new ReportLoad(advance, replica, running, waiting, tokens);
+        select (Command)new ReportLoad(advance, replica, running, waiting);
 
     private static readonly Gen<Command> Health =
         from advance in Advance
@@ -71,25 +65,24 @@ public static class Generators
 
     private static readonly Gen<Command> Tick = Advance.Select(a => (Command)new TickClock(a));
 
-    private static Gen<Command> Command(KvReports kv) => Gen.Frequency(
+    private static readonly Gen<Command> Command = Gen.Frequency(
         (8, Request),
         (6, Complete),
         (2, Abandon),
-        (3, Load(kv)),
+        (3, Load),
         (1, Health),
         (1, End),
         (2, Tick));
 
     private static Gen<int[]?> Seed(int replicas, Gen<int> each) => each.ArrayOf(replicas).Select(a => (int[]?)a);
 
-    private static Gen<Scenario> Scenario(KvReports kv, Func<int, Gen<int[]?>> capacity, Func<int, Gen<int[]?>> kvPool) =>
+    private static Gen<Scenario> Scenario(Func<int, Gen<int[]?>> capacity) =>
         from count in Gen.Choose(1, 3)
         from replicas in Replicas(count)
         from cap in capacity(count)
-        from pool in kvPool(count)
         from length in Gen.Choose(1, 40)
-        from commands in Command(kv).ArrayOf(length)
-        select new Scenario(replicas, cap, pool, commands);
+        from commands in Command.ArrayOf(length)
+        select new Scenario(replicas, cap, commands);
 
     private static Gen<Replica[]> Replicas(int count) =>
         Enumerable.Range(0, count).Aggregate(
@@ -99,13 +92,10 @@ public static class Generators
     private static Gen<int[]?> None(int _) => Gen.Constant<int[]?>(null);
 
     public static Arbitrary<Scenario> Any() =>
-        Arb.From(Scenario(KvReports.Sometimes, None, None), Shrinker.Shrink);
+        Arb.From(Scenario(None), Shrinker.Shrink);
 
     public static Arbitrary<Scenario> Capped() =>
-        Arb.From(Scenario(KvReports.Never, n => Seed(n, Gen.Choose(1, 3)), None), Shrinker.Shrink);
-
-    public static Arbitrary<Scenario> Pooled() =>
-        Arb.From(Scenario(KvReports.Sometimes, None, n => Seed(n, Gen.Choose(200, 4000))), Shrinker.Shrink);
+        Arb.From(Scenario(n => Seed(n, Gen.Choose(1, 3))), Shrinker.Shrink);
 }
 
 public static class AnyScenario
@@ -116,9 +106,4 @@ public static class AnyScenario
 public static class CappedScenario
 {
     public static Arbitrary<Scenario> Scenario() => Generators.Capped();
-}
-
-public static class PooledScenario
-{
-    public static Arbitrary<Scenario> Scenario() => Generators.Pooled();
 }

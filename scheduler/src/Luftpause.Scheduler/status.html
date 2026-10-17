@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>luftpause status</title>
 <style>
-:root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #e2e2e6; --track: #ececf0; --kv: #3b6fd8; --slots: #2f9e6e; --bad: #c8463d; }
+:root { --bg: #fafafa; --fg: #1d1d1f; --muted: #6e6e73; --line: #e2e2e6; --track: #ececf0; --slots: #2f9e6e; --bad: #c8463d; }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #151517; --fg: #ececf0; --muted: #9a9aa2; --line: #2c2c31; --track: #26262b; --kv: #6c95ec; --slots: #4cc18e; --bad: #ec6f66; }
+  :root { --bg: #151517; --fg: #ececf0; --muted: #9a9aa2; --line: #2c2c31; --track: #26262b; --slots: #4cc18e; --bad: #ec6f66; }
 }
 * { box-sizing: border-box; }
 body { margin: 0; padding: 16px; background: var(--bg); color: var(--fg); font: 14px/1.4 system-ui, sans-serif; }
@@ -26,7 +26,6 @@ h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: v
 .bar { display: grid; grid-template-columns: 70px 1fr minmax(90px, auto); gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
 .track { height: 10px; background: var(--track); border-radius: 5px; overflow: hidden; }
 .fill { height: 100%; }
-.kv .fill { background: var(--kv); }
 .slots .fill { background: var(--slots); }
 .over .fill { background: var(--bad); }
 table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
@@ -104,7 +103,6 @@ function renderScheduler(s) {
     : s.replicas.map(r => el("div", { class: "replica" + (r.healthy ? "" : " down") },
         el("div", { class: "name" }, r.id, el("small", {}, r.class + (r.healthy ? "" : " · unhealthy") + " · " + r.activeRuns + " active runs")),
         el("div", {},
-          bar("KV", "kv", r.kvInFlight, r.kvPool),
           bar("in flight", "slots", r.inFlight, r.capacity))))));
 
   document.getElementById("held").replaceChildren(table(

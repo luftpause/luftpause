@@ -13,7 +13,6 @@ public static class ProtocolMapping
         request.Resumed,
         request.AtUnixMs,
         request.ServiceClass == Proto.ServiceClass.Batch ? ServiceClass.Batch : ServiceClass.Interactive,
-        (int)request.RequestBytes,
         request.Caller);
 
     public static SchedulerEvent? ToEvent(Proto.TurnEvent e) => e.KindCase switch

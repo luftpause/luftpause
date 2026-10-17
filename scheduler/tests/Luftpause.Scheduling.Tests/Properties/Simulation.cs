@@ -27,10 +27,10 @@ public sealed record Trace(Scenario Scenario, ImmutableList<Step> Steps)
 
     private static string Format(SchedulerEvent e) => e switch
     {
-        TurnRequested r => $"@{r.AtUnixMs} TurnRequested {r.TurnId} {r.RunId} {r.Class} {r.Service} {r.Model} {r.Caller} {r.RequestBytes}B{(r.Resumed ? " resumed" : "")}",
+        TurnRequested r => $"@{r.AtUnixMs} TurnRequested {r.TurnId} {r.RunId} {r.Class} {r.Service} {r.Model} {r.Caller}{(r.Resumed ? " resumed" : "")}",
         TurnCompleted c => $"@{c.AtUnixMs} TurnCompleted {c.TurnId} {c.RunId} {c.FinishReason} prompt={c.Usage.Prompt} completion={c.Usage.Completion}",
         TurnAbandoned a => $"@{a.AtUnixMs} TurnAbandoned {a.TurnId} {a.RunId}",
-        ReplicaLoadReported l => $"@{l.AtUnixMs} Load {l.ReplicaId} running={l.Running} waiting={l.Waiting}{(l.KvTokens is { } kv ? $" kv={kv}" : "")}",
+        ReplicaLoadReported l => $"@{l.AtUnixMs} Load {l.ReplicaId} running={l.Running} waiting={l.Waiting}",
         ReplicaHealthChanged h => $"@{h.AtUnixMs} Health {h.ReplicaId} {(h.Healthy ? "healthy" : "unhealthy")}",
         RunEnded r => $"@{r.AtUnixMs} RunEnded {r.RunId}",
         Tick t => $"@{t.AtUnixMs} Tick",
@@ -51,15 +51,8 @@ public static class Simulation
         return new Trace(scenario, end.Steps);
     }
 
-    public static SchedulerState Initial(Scenario scenario)
-    {
-        var initial = SchedulerState.Initial(scenario.Replicas);
-        return initial with
-        {
-            Capacity = Seed(scenario.Replicas, scenario.Capacity),
-            KvPool = Seed(scenario.Replicas, scenario.KvPool),
-        };
-    }
+    public static SchedulerState Initial(Scenario scenario) =>
+        SchedulerState.Initial(scenario.Replicas) with { Capacity = Seed(scenario.Replicas, scenario.Capacity) };
 
     private static ImmutableDictionary<string, int> Seed(Replica[] replicas, int[]? values) =>
         values is null
@@ -83,13 +76,13 @@ public static class Simulation
 
     private static SchedulerEvent? Resolve(Scenario scenario, SchedulerState state, Command command, long now, int nextTurn) => command switch
     {
-        RequestTurn r => new TurnRequested($"t{nextTurn}", $"run{r.Run}", r.Engine, r.Model, r.Resumed, now, r.Service, r.RequestBytes, r.Caller),
+        RequestTurn r => new TurnRequested($"t{nextTurn}", $"run{r.Run}", r.Engine, r.Model, r.Resumed, now, r.Service, r.Caller),
         CompleteTurn c => Pick(InFlight(state), c.Pick) is { } t
             ? new TurnCompleted(t.TurnId, t.RunId, c.ToolCalls ? "tool_calls" : "stop", new TokenUsage(c.PromptTokens, c.CompletionTokens, 0), false, now)
             : null,
         AbandonTurn { Held: true } a => Pick(state.Waiting, a.Pick) is { } w ? new TurnAbandoned(w.TurnId, w.RunId, now) : null,
         AbandonTurn a => Pick(InFlight(state), a.Pick) is { } t ? new TurnAbandoned(t.TurnId, t.RunId, now) : null,
-        ReportLoad l => new ReplicaLoadReported(ReplicaId(scenario, l.Replica), l.Running, l.Waiting, now, l.KvTokens),
+        ReportLoad l => new ReplicaLoadReported(ReplicaId(scenario, l.Replica), l.Running, l.Waiting, now),
         SetHealth h => new ReplicaHealthChanged(ReplicaId(scenario, h.Replica), h.Healthy, now),
         EndRun r => new RunEnded($"run{r.Run}", now),
         TickClock => new Tick(now),

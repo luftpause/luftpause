@@ -6,17 +6,17 @@ public class WorkingSetTests
     private static readonly Replica B = new("b", "http://b", EngineClass.Generative);
     private static readonly Decider Decider = new(new AffinityRouting(new LeastLoadedRouting()));
 
-    private static TurnRequested Request(string turnId, string runId, long at = 0, int bytes = 0, bool resumed = false) =>
-        new(turnId, runId, EngineClass.Generative, "m", resumed, at, RequestBytes: bytes);
+    private static TurnRequested Request(string turnId, string runId, long at = 0, bool resumed = false) =>
+        new(turnId, runId, EngineClass.Generative, "m", resumed, at);
 
-    private static TurnCompleted Paused(string turnId, string runId, int prompt = 400, int completion = 10) =>
-        new(turnId, runId, "tool_calls", new TokenUsage(prompt, completion, 0), false, 1);
+    private static TurnCompleted Paused(string turnId, string runId) =>
+        new(turnId, runId, "tool_calls", new TokenUsage(400, 10, 0), false, 1);
 
     private static TurnCompleted Finished(string turnId, string runId, string finish = "stop") =>
         new(turnId, runId, finish, new TokenUsage(100, 10, 0), false, 2);
 
-    private static SchedulerState WithPool(SchedulerState state, string replica, int kvTokens) =>
-        state with { KvPool = state.KvPool.SetItem(replica, kvTokens) };
+    private static SchedulerState WithCapacity(SchedulerState state, string replica, int capacity) =>
+        state with { Capacity = state.Capacity.SetItem(replica, capacity) };
 
     private static Decision Run(SchedulerState state, params SchedulerEvent[] events) =>
         events.Aggregate(Decision.Unchanged(state), (d, e) => d.Then(s => Decider.Decide(s, e)));
@@ -25,20 +25,20 @@ public class WorkingSetTests
         decision.Actions.OfType<RouteTurn>().Select(r => r.TurnId);
 
     [Fact]
-    public void Turns_go_to_a_replica_while_their_memory_needs_fit_its_pool()
+    public void Turns_go_to_a_replica_while_it_has_room_under_its_capacity()
     {
-        var decision = Run(WithPool(SchedulerState.Initial([A]), "a", 1000),
-            Request("t1", "r1", bytes: 2000), Request("t2", "r2", bytes: 2000), Request("t3", "r3", bytes: 2000));
+        var decision = Run(WithCapacity(SchedulerState.Initial([A]), "a", 2),
+            Request("t1", "r1"), Request("t2", "r2"), Request("t3", "r3"));
 
         Assert.Equal(["t1", "t2"], RoutedTurns(decision));
         Assert.Equal("t3", Assert.Single(decision.State.Waiting).TurnId);
     }
 
     [Fact]
-    public void A_finished_turn_frees_its_memory_for_a_waiting_one()
+    public void A_finished_turn_frees_its_place_for_a_waiting_one()
     {
-        var full = Run(WithPool(SchedulerState.Initial([A]), "a", 1000),
-            Request("t1", "r1", bytes: 2000), Request("t2", "r2", bytes: 2000), Request("t3", "r3", bytes: 2000));
+        var full = Run(WithCapacity(SchedulerState.Initial([A]), "a", 2),
+            Request("t1", "r1"), Request("t2", "r2"), Request("t3", "r3"));
 
         var freed = Decider.Decide(full.State, Finished("t1", "r1"));
 
@@ -46,54 +46,24 @@ public class WorkingSetTests
     }
 
     [Fact]
-    public void A_turn_larger_than_the_pool_runs_alone()
+    public void Runs_paused_on_a_tool_take_no_place_from_new_interactive_runs()
     {
-        var decision = Run(WithPool(SchedulerState.Initial([A]), "a", 1000), Request("t1", "r1", bytes: 40000));
+        var paused = Run(WithCapacity(SchedulerState.Initial([A]), "a", 2),
+            Request("t1", "r1"), Paused("t1", "r1"),
+            Request("t2", "r2"), Paused("t2", "r2"));
 
-        Assert.Equal(["t1"], RoutedTurns(decision));
-    }
-
-    [Fact]
-    public void Runs_paused_on_a_tool_take_no_memory_from_new_runs()
-    {
-        var paused = Run(WithPool(SchedulerState.Initial([A]), "a", 1000),
-            Request("t1", "r1", bytes: 2000), Paused("t1", "r1"),
-            Request("t2", "r2", bytes: 2000), Paused("t2", "r2"));
-
-        var decision = Run(paused.State, Request("t3", "r3", bytes: 2000, at: 3), Request("t4", "r4", bytes: 2000, at: 3));
+        var decision = Run(paused.State, Request("t3", "r3", at: 3), Request("t4", "r4", at: 3));
 
         Assert.Equal(["t3", "t4"], RoutedTurns(decision));
     }
 
     [Fact]
-    public void The_bytes_per_token_of_completed_turns_size_the_next_ones()
-    {
-        var learned = Run(WithPool(SchedulerState.Initial([A]), "a", 1000),
-            Request("t1", "r1", bytes: 1000), Paused("t1", "r1", prompt: 500, completion: 0));
-
-        var decision = Run(learned.State, Request("t2", "r2", bytes: 1000, at: 3), Request("t3", "r3", bytes: 1000, at: 3), Request("t4", "r4", bytes: 1000, at: 3));
-
-        Assert.Equal(["t2", "t3"], RoutedTurns(decision));
-    }
-
-    [Fact]
-    public void A_replica_without_a_known_memory_size_takes_any_number_of_turns()
+    public void A_replica_without_a_known_capacity_takes_any_number_of_turns()
     {
         var decision = Run(SchedulerState.Initial([A]),
-            Request("t1", "r1", bytes: 40000), Request("t2", "r2", bytes: 40000), Request("t3", "r3", bytes: 40000));
+            Request("t1", "r1"), Request("t2", "r2"), Request("t3", "r3"));
 
         Assert.Equal(["t1", "t2", "t3"], RoutedTurns(decision));
-    }
-
-    [Fact]
-    public void Paused_interactive_runs_do_not_hold_back_batch_turns_on_a_replica_with_a_known_pool()
-    {
-        var paused = Run(WithPool(SchedulerState.Initial([A]), "a", 1000),
-            Request("i1", "chat", bytes: 400), Paused("i1", "chat"));
-
-        var batch = Decider.Decide(paused.State, new TurnRequested("b1", "job", EngineClass.Generative, "m", false, 3, ServiceClass.Batch, 400));
-
-        Assert.Equal(["b1"], RoutedTurns(batch));
     }
 
     [Fact]
@@ -157,11 +127,4 @@ public class WorkingSetTests
         Assert.False(ended.State.Runs.ContainsKey("chat"));
     }
 
-    [Fact]
-    public void A_load_report_records_the_engines_memory_size()
-    {
-        var decision = Decider.Decide(SchedulerState.Initial([A]), new ReplicaLoadReported("a", 0, 0, 0, 24000));
-
-        Assert.Equal(24000, decision.State.KvPool["a"]);
-    }
 }

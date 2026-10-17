@@ -43,22 +43,9 @@ public class EngineMetricsTests
     }
 
     [Fact]
-    public void Sglang_memory_size_in_tokens_is_read()
+    public void Summed_samples_add_running_and_waiting_across_engines()
     {
-        const string text = """
-            sglang:num_running_reqs{model_name="m"} 5.0
-            sglang:num_queue_reqs{model_name="m"} 3.0
-            sglang:max_total_num_tokens{model_name="m",tp_rank="0"} 24000.0
-            """;
-
-        Assert.Equal(new EngineLoadSample(5, 3, 24000), EngineMetrics.Parse(text));
-    }
-
-    [Fact]
-    public void Summed_samples_know_the_memory_size_only_when_every_engine_reports_it()
-    {
-        Assert.Equal(new EngineLoadSample(3, 1, 30000), EngineLoadSample.Sum([new(1, 0, 10000), new(2, 1, 20000)]));
-        Assert.Null(EngineLoadSample.Sum([new(1, 0, 10000), new(2, 1)]).KvTokens);
+        Assert.Equal(new EngineLoadSample(3, 1), EngineLoadSample.Sum([new(1, 0), new(2, 1)]));
     }
 
     [Fact]
