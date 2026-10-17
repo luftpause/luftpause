@@ -47,7 +47,10 @@ docker compose -f compose.yaml -f compose.ollama.yaml up -d scheduler dataplane 
 
 Ollama needs the model pulled (`ollama pull llama3.2:1b`, or set `OLLAMA_MODEL`)
 and must listen beyond loopback (`OLLAMA_HOST=0.0.0.0`) unless Docker Desktop
-already reaches it. SGLang on your GPU (`compose.testbed.yaml`) or any
+already reaches it (it does on Windows and macOS with the default loopback
+binding). Ollama serves one request at a time unless `OLLAMA_NUM_PARALLEL` is
+raised, so sub-agents queue behind each other there; luftpause sees no queue
+metric from it and does not cap it. SGLang on your GPU (`compose.testbed.yaml`) or any
 OpenAI-compatible endpoint (`compose.runpod.yaml` shows a hosted vLLM pod) work
 the same way.
 
