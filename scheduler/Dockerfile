@@ -8,7 +8,7 @@ FROM mcr.microsoft.com/dotnet/aspnet:10.0
 ARG VERSION=dev
 LABEL org.opencontainers.image.source=https://github.com/luftpause/luftpause
 LABEL org.opencontainers.image.version=$VERSION
-LABEL org.opencontainers.image.licenses=Elastic-2.0
+LABEL org.opencontainers.image.licenses=BUSL-1.1
 WORKDIR /app
 ENV ASPNETCORE_HTTP_PORTS=
 COPY --from=build /out .

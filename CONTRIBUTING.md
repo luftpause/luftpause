@@ -13,7 +13,9 @@ Issues and pull requests are welcome.
 
 ## License of contributions
 
-luftpause is distributed under the [Elastic License 2.0](LICENSE). By submitting
-a contribution you agree that it is licensed under the same terms, and you grant
-the project the right to also distribute it under any OSI-approved open source
-license the project adopts later. No other paperwork is required.
+luftpause is distributed under the [Business Source License 1.1](LICENSE), which
+turns into the Apache License 2.0 four years after each version is published. By
+submitting a contribution you agree that it is licensed under the same terms,
+including that conversion, and you grant the project the right to also distribute
+it under any OSI-approved open source license the project adopts earlier. No other
+paperwork is required.

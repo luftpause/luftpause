@@ -17,5 +17,5 @@ FROM debian:bookworm-slim
 ARG VERSION=dev
 LABEL org.opencontainers.image.source=https://github.com/luftpause/luftpause
 LABEL org.opencontainers.image.version=$VERSION
-LABEL org.opencontainers.image.licenses=Elastic-2.0
+LABEL org.opencontainers.image.licenses=BUSL-1.1
 COPY --from=build /out/ /usr/local/bin/
