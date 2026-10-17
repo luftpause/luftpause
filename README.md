@@ -141,7 +141,7 @@ flowchart LR
 
 | Capability | How |
 |---|---|
-| `spawn` / `await` over MCP | `spawn(task, model?, serviceClass?, system?, maxToolCalls?, tools?, maxTokens?, parallelToolCalls?, parent?)` returns a handle at once; `await(handles, all\|any, timeout)` collects results with `toolCalls` / `failedToolCalls`; also `tools`, `status`, `cancel`, `decide` |
+| `spawn` / `await` over MCP | `spawn(task, model?, serviceClass?, system?, maxToolCalls?, tools?, maxTokens?, parallelToolCalls?, parent?)` returns a handle at once; `await(handles, all\|any, timeout)` collects results with `toolCalls` / `failedToolCalls`; also `tools`, `status`, `cancel`, and `decide(input, labels?, model?)`: without `labels` the single-pass model's labels, with 2 to 20 `labels` one `max_tokens: 1` turn on the generative model scored by first-token logprobs, returning `label`, `probabilities` and `unscored` |
 | Durable runs | every run is journaled (`runs.jsonl` under `Runtime:StateDir`): spawned, each tool round's messages, finished; on restart the runtime replays the journal, answers `await` for finished runs and resumes unfinished ones from their last complete tool round |
 | Run tree | `spawn(parent)` makes a run a child; `status` lists `parent` and `children`; `cancel` of a parent cancels its running descendants; the runtime's `GET /status` returns the tree with each run's own work and its subtree's totals (turns, tool calls, failed tool calls, prompt and completion tokens, turn and tool seconds) |
 | Status | the scheduler's `GET /status` on `:5001` (HTTP/1; gRPC stays on `:5000`) returns replicas with in-flight turns against capacity and KV tokens in flight against the pool, held turns by class and caller with the oldest wait, and runs by phase and class; `GET /` there is a page that polls it every 2 s, and with `?runtime=http://host:7000` also shows that runtime's run tree and subtree costs |
@@ -157,7 +157,7 @@ flowchart LR
 | Health | `/health` (or any path per endpoint) probed every 2 s; unhealthy replicas receive no turns |
 | Tool-call hygiene | arguments coerced to the schema's scalar types, validated, and rejected with the expected shape instead of a silent bad call; calls written as text are recovered |
 | Run identity | `x-luftpause-run-id`, or the `tool_call_id`s an agent echoes back |
-| Single-pass engines | `POST /v1/decide` (vLLM `/classify` shape) on separate replicas, outside run state |
+| Single-pass engines | `POST /v1/decide` (vLLM `/classify` shape) on separate replicas, outside run state; `decide` with caller-given `labels` needs no second model and runs as one interactive turn on a generative replica |
 
 ## Failure semantics
 
@@ -324,7 +324,9 @@ the decisions that do not need a generated reply, such as routing a request,
 scoring a tool result or choosing the next step, at a few milliseconds instead of a
 generated turn. Sub-agents reach it through the `decide` MCP tool; own-loop agents
 through `POST /v1/decide`. Single-pass turns are placed on their own replicas and
-never enter run state, so they neither hold nor wait for a generative slot.
+never enter run state, so they neither hold nor wait for a generative slot. For a label set
+the classifier was not trained on, `decide(labels: [...])` scores the labels from a
+generative replica's first-token logprobs instead, at the cost of one one-token turn.
 
 | Load | Latency at the data plane |
 |---|---|
