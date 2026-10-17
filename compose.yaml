@@ -1,14 +1,18 @@
 name: luftpause
 
 x-fake-engine: &fake-engine
-  image: luftpause-dataplane
+  image: ${LUFTPAUSE_REGISTRY:-ghcr.io/luftpause}/dataplane:${LUFTPAUSE_VERSION:-latest}
   command: ["fake-engine"]
   depends_on: [dataplane]
 
 services:
   scheduler:
-    build: { context: ., dockerfile: scheduler/Dockerfile }
-    image: luftpause-scheduler
+    build:
+      context: .
+      dockerfile: scheduler/Dockerfile
+      args:
+        VERSION: ${LUFTPAUSE_VERSION:-dev}
+    image: ${LUFTPAUSE_REGISTRY:-ghcr.io/luftpause}/scheduler:${LUFTPAUSE_VERSION:-latest}
     environment:
       Engines__Generative__0__Id: fake-a
       Engines__Generative__0__BaseUrl: http://fake-engine-a:9000
@@ -20,8 +24,12 @@ services:
     ports: ["5001:5001"]
 
   dataplane:
-    build: { context: ., dockerfile: dataplane/Dockerfile }
-    image: luftpause-dataplane
+    build:
+      context: .
+      dockerfile: dataplane/Dockerfile
+      args:
+        VERSION: ${LUFTPAUSE_VERSION:-dev}
+    image: ${LUFTPAUSE_REGISTRY:-ghcr.io/luftpause}/dataplane:${LUFTPAUSE_VERSION:-latest}
     command: ["dataplane"]
     environment:
       SCHEDULER_URL: http://scheduler:5000
@@ -30,8 +38,12 @@ services:
     depends_on: [scheduler]
 
   runtime:
-    build: { context: ., dockerfile: runtime/Dockerfile }
-    image: luftpause-runtime
+    build:
+      context: .
+      dockerfile: runtime/Dockerfile
+      args:
+        VERSION: ${LUFTPAUSE_VERSION:-dev}
+    image: ${LUFTPAUSE_REGISTRY:-ghcr.io/luftpause}/runtime:${LUFTPAUSE_VERSION:-latest}
     environment:
       DataPlane__Url: http://dataplane:8080/
       LUFTPAUSE_TOKEN: ${LUFTPAUSE_TOKEN:-}
@@ -44,7 +56,7 @@ services:
     depends_on: [dataplane, fake-mcp]
 
   fake-mcp:
-    image: luftpause-dataplane
+    image: ${LUFTPAUSE_REGISTRY:-ghcr.io/luftpause}/dataplane:${LUFTPAUSE_VERSION:-latest}
     command: ["fake-mcp"]
     environment:
       TOOL_MS_MEDIAN: 1000

@@ -31,9 +31,11 @@ Measured on one 8 GB laptop GPU, engines saturated (48 batch runs flooding,
 ## Try it
 
 ```bash
-docker compose up -d --build        # fake engines, no GPU needed; first build takes a few minutes
+docker compose up -d                # fake engines, no GPU needed
 claude mcp add --transport http --scope local luftpause http://localhost:7000/mcp
 ```
+
+`docker compose up -d` pulls the published images; add `--build` to build them from source instead (first build takes a few minutes).
 
 Claude Code now has `spawn`, `await`, `status`, `cancel` and `tools`. The fake
 engines answer with filler — enough to see the fan-out. For real answers from
@@ -213,6 +215,8 @@ dotnet run --project tools/loadgen -- --spawn 10 # fan 10 sub-agents out over MC
 dotnet run --project tools/loadgen -- --agents 8 --duration-s 60 --class batch --caller me # 8 own-loop agents through the proxy, closed loop
 tools/check.sh                                   # both .NET test projects, loadgen, cargo test (when cargo is installed), image builds
 ```
+
+Releasing: `tools/release.sh vX.Y.Z` builds, tags and pushes the three images to `ghcr.io/luftpause` (`LUFTPAUSE_REGISTRY` overrides) and creates the git tag; `DRY_RUN=1` prints the commands only.
 
 With a token: `LUFTPAUSE_TOKEN=<token> docker compose up -d`, then `claude mcp add --transport http luftpause http://localhost:7000/mcp --header "Authorization: Bearer <token>"`.
 
