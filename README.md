@@ -20,12 +20,12 @@ luftpause sits between the harness and the engines and keeps the run:
 Measured on one 8 GB laptop GPU, engines saturated (48 batch runs flooding,
 4 interactive runs beside them):
 
-| | Interactive throughput | Interactive run time p50 | Batch throughput |
+| | Throughput | Latency | What it costs |
 |---|---|---|---|
-| Agents with their own loop, through luftpause vs straight to the SGLang router | **1.9×** (11.9 vs 6.4 runs/min) | 19 s instead of 36 s | −8 % |
-| Sub-agents over MCP, luftpause vs the runtime straight to the router | **2.1×** (6.5 vs 3.0 runs/min) | 32 s instead of 58 s | unchanged |
-| Fan-out, 16 sub-agents, vs one at a time | **5.3×** (23 s instead of 120 s) | | |
-| Claude Code as the client | spawns and awaits on its own, unprompted; 70B sub-agents finished in one round with no failed tool calls | | |
+| Agents with their own loop, through luftpause vs straight to the SGLang router | **1.9×** interactive (11.9 vs 6.4 runs/min) | interactive p50 19 s instead of 36 s | batch −8 % |
+| Sub-agents over MCP, luftpause vs the runtime straight to the router | **2.1×** interactive (6.5 vs 3.0 runs/min) | interactive p50 32 s instead of 58 s | batch unchanged |
+| Fan-out, 16 sub-agents, vs one at a time | **5.3×** (all 16 in 23 s instead of 120 s) | per sub-agent p50 15–22 s, the same as through the router | nothing: the router alone takes 21.5 s |
+| Claude Code as the client, six Wikipedia look-ups | **2.9×** (12.5 s instead of 36 s back to back, unprompted) | 70B sub-agents: all six in one round, 9.3 s | 0 failed tool calls, 0 re-spawns |
 
 ## Try it
 
