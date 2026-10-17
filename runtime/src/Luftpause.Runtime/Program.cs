@@ -22,7 +22,7 @@ builder.Services.AddSingleton<IRunLoop, AgentLoop>();
 builder.Services.AddSingleton(RunJournal.Replay(journalPath));
 builder.Services.AddSingleton(_ => new RunJournal(journalPath));
 builder.Services.AddSingleton<RunRegistry>();
-builder.Services.AddMcpServer().WithHttpTransport().WithTools<LuftpauseTools>();
+builder.Services.AddLuftpauseMcp();
 
 var app = builder.Build();
 app.Services.GetRequiredService<RunRegistry>().ResumeAll();

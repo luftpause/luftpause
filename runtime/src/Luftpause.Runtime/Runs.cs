@@ -5,7 +5,7 @@ namespace Luftpause.Runtime;
 public enum RunStatus { Running, Completed, Failed, Cancelled }
 
 public sealed record RunSpec(
-    string Task, string Model, string ServiceClass, string? System, int MaxToolCalls, IReadOnlySet<string>? Tools = null, int? MaxTokens = null, bool ParallelToolCalls = false);
+    string Task, string Model, string ServiceClass, string? System, int MaxToolCalls, IReadOnlySet<string>? Tools = null, int? MaxTokens = null, bool ParallelToolCalls = false, string? Caller = null);
 
 public sealed record RunOutcome(RunStatus Status, string? Answer, string? Error);
 
@@ -16,6 +16,7 @@ public sealed record RunView(
 public sealed class RunRecord(string handle, RunSpec spec, DateTimeOffset started, CancellationTokenSource cancel, string? parent = null)
 {
     private volatile RunWork work = RunWork.None;
+    private TaskCompletionSource changed = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private volatile IReadOnlyList<JsonObject> messages = AgentLoop.InitialMessages(spec);
 
     public string Handle { get; } = handle;
@@ -29,8 +30,14 @@ public sealed class RunRecord(string handle, RunSpec spec, DateTimeOffset starte
     public RunWork Work
     {
         get => work;
-        set => work = value;
+        set
+        {
+            work = value;
+            Interlocked.Exchange(ref changed, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).TrySetResult();
+        }
     }
+
+    public Task WorkChanged => Volatile.Read(ref changed).Task;
 
     public IReadOnlyList<JsonObject> Messages
     {

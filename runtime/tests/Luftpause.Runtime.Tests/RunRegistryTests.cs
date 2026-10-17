@@ -116,6 +116,68 @@ public sealed class RunRegistryTests : IDisposable
         Assert.Equal("tool", SingleStart().Messages[^1]["role"]!.GetValue<string>());
     }
 
+    private sealed class Watcher : IProgress<RunView>
+    {
+        private readonly System.Threading.Channels.Channel<RunView> seen = System.Threading.Channels.Channel.CreateUnbounded<RunView>();
+
+        public void Report(RunView value) => seen.Writer.TryWrite(value);
+
+        public async Task<(RunStatus Status, int Turns, int ToolCalls)> NextAsync()
+        {
+            var view = await seen.Reader.ReadAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+            return (view.Status, view.Turns, view.ToolCalls);
+        }
+
+        public bool Idle => !seen.Reader.TryPeek(out _);
+    }
+
+    [Fact]
+    public async Task Await_reports_where_each_run_stands_then_every_change_and_returns_the_final_state()
+    {
+        var step = new SemaphoreSlim(0);
+        loop.Run = async (_, report, _) =>
+        {
+            await step.WaitAsync();
+            report(new RunProgress(RunWork.None with { Turns = 1 }, []));
+            await step.WaitAsync();
+            report(new RunProgress(RunWork.None with { Turns = 1, ToolCalls = 1 }, [ToolCalls(), ToolResult()]));
+            await step.WaitAsync();
+            return new RunOutcome(RunStatus.Completed, "answer", null);
+        };
+        var registry = Registry();
+        var record = registry.Spawn(Spec);
+        var watcher = new Watcher();
+
+        var waiting = registry.AwaitAsync([record.Handle], true, TimeSpan.FromSeconds(30), watcher, CancellationToken.None);
+        Assert.Equal((RunStatus.Running, 0, 0), await watcher.NextAsync());
+        step.Release();
+        Assert.Equal((RunStatus.Running, 1, 0), await watcher.NextAsync());
+        step.Release();
+        Assert.Equal((RunStatus.Running, 1, 1), await watcher.NextAsync());
+        step.Release();
+        Assert.Equal((RunStatus.Completed, 1, 1), await watcher.NextAsync());
+        var views = await waiting;
+
+        Assert.Equal(("answer", 1, 1), (views[0].Answer, views[0].Turns, views[0].ToolCalls));
+        Assert.True(watcher.Idle);
+    }
+
+    [Fact]
+    public async Task Await_on_finished_runs_reports_nothing()
+    {
+        var registry = Registry(
+            new RunSpawned("run-1", Spec, DateTimeOffset.UnixEpoch, null),
+            new RunTurned("run-1", [ToolCalls(), ToolResult()], RunWork.None with { Turns = 1, ToolCalls = 1 }),
+            new RunFinished("run-1", new RunOutcome(RunStatus.Completed, "answer", null), DateTimeOffset.UnixEpoch));
+        registry.ResumeAll();
+        var watcher = new Watcher();
+
+        var views = await registry.AwaitAsync(["run-1"], true, TimeSpan.FromSeconds(30), watcher, CancellationToken.None);
+
+        Assert.Equal("answer", views[0].Answer);
+        Assert.True(watcher.Idle);
+    }
+
     [Fact]
     public void Spawn_with_an_unknown_parent_throws()
     {

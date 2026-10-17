@@ -32,6 +32,8 @@ public sealed class LlmClient(HttpClient http)
             var request = new HttpRequestMessage(HttpMethod.Post, "v1/chat/completions") { Content = JsonContent.Create(body) };
             request.Headers.Add("x-luftpause-run-id", runId);
             request.Headers.Add("x-luftpause-class", spec.ServiceClass);
+            if (spec.Caller is { } caller)
+                request.Headers.Add("x-luftpause-caller", caller);
             return request;
         }, cancel);
         var text = await response.Content.ReadAsStringAsync(cancel);

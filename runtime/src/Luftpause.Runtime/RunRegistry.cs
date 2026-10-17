@@ -51,17 +51,42 @@ public sealed class RunRegistry(
     }
 
     public async Task<IReadOnlyList<RunView>> AwaitAsync(
-        IReadOnlyList<string> handles, bool all, TimeSpan timeout, CancellationToken cancel)
+        IReadOnlyList<string> handles, bool all, TimeSpan timeout, IProgress<RunView> progress, CancellationToken cancel)
     {
         var records = handles.Select(Find).OfType<RunRecord>().ToList();
-        var pending = records.Select(r => r.Completion).Where(t => !t.IsCompleted).ToList();
-        if (pending.Count > 0 && (all || records.All(r => !r.Completion.IsCompleted)))
+        var deadline = Task.Delay(timeout, time, cancel);
+        var reported = Views(records).Select(v => v.Status == RunStatus.Running ? (RunMark?)null : RunMark.Of(v)).ToList();
+        while (true)
         {
-            Task waitFor = all ? Task.WhenAll(pending) : Task.WhenAny(pending);
-            await Task.WhenAny(waitFor, Task.Delay(timeout, time, cancel));
+            var signals = records.Select(r => r.WorkChanged).ToList();
+            reported = Report(Views(records), reported, progress);
+            if (!Waiting(records, all) || deadline.IsCompleted)
+                break;
+            await Task.WhenAny([deadline, .. signals, .. records.Select(r => r.Completion)]);
         }
+        return Views(records);
+    }
+
+    private List<RunView> Views(IReadOnlyList<RunRecord> records)
+    {
         var now = time.GetUtcNow();
         return records.Select(r => View(r, now)).ToList();
+    }
+
+    private static bool Waiting(IReadOnlyList<RunRecord> records, bool all) =>
+        records.Any(r => !r.Completion.IsCompleted) && (all || records.All(r => !r.Completion.IsCompleted));
+
+    private static List<RunMark?> Report(IReadOnlyList<RunView> views, IReadOnlyList<RunMark?> reported, IProgress<RunView> progress)
+    {
+        var current = views.Select(v => (RunMark?)RunMark.Of(v)).ToList();
+        foreach (var view in views.Zip(current, reported).Where(v => v.Second != v.Third).Select(v => v.First))
+            progress.Report(view);
+        return current;
+    }
+
+    private sealed record RunMark(RunStatus Status, int Turns, int ToolCalls)
+    {
+        public static RunMark Of(RunView view) => new(view.Status, view.Turns, view.ToolCalls);
     }
 
     private void Adopt(RunRecord record)
