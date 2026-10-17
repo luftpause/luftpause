@@ -1,12 +1,17 @@
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::ledger::RunLedger;
 use crate::observe::Outcome;
-use crate::proto::{FirstToken, RunEnded, TurnCompleted, TurnEvent, TurnStarted, turn_event::Kind};
+use crate::proto::{FirstToken, RunEnded, TurnCompleted, TurnEvent, TurnRequest, TurnStarted, turn_event::Kind};
 
 #[derive(Clone)]
-pub struct EventSink(UnboundedSender<TurnEvent>);
+pub struct EventSink {
+    events: UnboundedSender<TurnEvent>,
+    ledger: Arc<RunLedger>,
+}
 
 #[derive(Clone)]
 pub struct TurnIds {
@@ -17,11 +22,12 @@ pub struct TurnIds {
 }
 
 impl EventSink {
-    pub fn new(sender: UnboundedSender<TurnEvent>) -> Self {
-        Self(sender)
+    pub fn new(events: UnboundedSender<TurnEvent>, ledger: Arc<RunLedger>) -> Self {
+        Self { events, ledger }
     }
 
-    pub fn started(&self, ids: &TurnIds, replica_id: &str) {
+    pub fn started(&self, ids: &TurnIds, replica_id: &str, request: &TurnRequest) {
+        self.ledger.started(request, replica_id, now_unix_ms());
         self.emit(ids, Kind::Started(TurnStarted { replica_id: replica_id.to_owned() }));
     }
 
@@ -30,6 +36,8 @@ impl EventSink {
     }
 
     pub fn completed(&self, ids: &TurnIds, outcome: &Outcome, failed: bool) {
+        let opens_tool_pause = !failed && outcome.finish_reason.as_deref() == Some("tool_calls");
+        self.ledger.completed(&ids.turn_id, opens_tool_pause, now_unix_ms());
         self.emit(
             ids,
             Kind::Completed(TurnCompleted {
@@ -43,12 +51,13 @@ impl EventSink {
     }
 
     pub fn run_ended(&self, run_id: &str) {
+        self.ledger.ended(run_id);
         let ids = TurnIds { turn_id: String::new(), run_id: run_id.to_owned(), trace_id: String::new(), span_id: String::new() };
         self.emit(&ids, Kind::RunEnded(RunEnded {}));
     }
 
     fn emit(&self, ids: &TurnIds, kind: Kind) {
-        let _ = self.0.send(TurnEvent {
+        let _ = self.events.send(TurnEvent {
             turn_id: ids.turn_id.clone(),
             run_id: ids.run_id.clone(),
             at_unix_ms: now_unix_ms(),

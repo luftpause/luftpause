@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::{Body, Bytes};
@@ -8,8 +8,10 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, post};
 use serde_json::{Value, json};
+use tokio::sync::watch;
 use tonic::metadata::MetadataMap;
 use tonic::transport::Channel;
+use tonic::{Code, Status};
 use tracing::field::Empty;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
@@ -29,10 +31,12 @@ pub const CLASS_HEADER: &str = "x-luftpause-class";
 pub const CALLER_HEADER: &str = "x-luftpause-caller";
 
 const CALLER_MAX_BYTES: usize = 128;
+const ADMIT_RETRY_DELAY: Duration = Duration::from_secs(1);
 
 #[derive(Clone)]
 pub struct AppState {
     pub scheduler: SchedulerClient<Channel>,
+    pub scheduler_synced: watch::Receiver<bool>,
     pub http: reqwest::Client,
     pub sink: EventSink,
     pub runs: Arc<RunIndex>,
@@ -86,16 +90,15 @@ async fn handle(app: AppState, headers: HeaderMap, body: Bytes, engine_class: En
     };
     let guard = AdmitGuard::new(app.sink.clone(), ids.clone());
 
-    let mut admit = tonic::Request::new(admit);
-    *admit.metadata_mut() = MetadataMap::from_headers(telemetry::trace_headers(&trace));
-    let decision = match app.scheduler.clone().admit(admit).await {
-        Ok(response) => response.into_inner().outcome,
+    let trace_metadata = MetadataMap::from_headers(telemetry::trace_headers(&trace));
+    let decision = match admit_once_reachable(&app, &admit, &trace_metadata).await {
+        Ok(decision) => decision,
         Err(status) => return error(StatusCode::SERVICE_UNAVAILABLE, &format!("scheduler: {}", status.message())),
     };
     let timings = TurnTimings { received, routed_after: received.elapsed() };
 
     let mut response = match decision {
-        Some(Outcome::Route(route)) => forward(&app, ids.clone(), route, body, timings, span.clone()).await,
+        Some(Outcome::Route(route)) => forward(&app, ids.clone(), &admit, route, body, timings, span.clone()).await,
         Some(Outcome::Refuse(refuse)) => refused(&refuse),
         None => error(StatusCode::SERVICE_UNAVAILABLE, "scheduler returned no decision"),
     };
@@ -108,6 +111,27 @@ async fn handle(app: AppState, headers: HeaderMap, body: Bytes, engine_class: En
         response.headers_mut().insert(RUN_ID_HEADER, value);
     }
     response
+}
+
+async fn admit_once_reachable(app: &AppState, request: &TurnRequest, trace: &MetadataMap) -> Result<Option<Outcome>, Status> {
+    let mut synced = app.scheduler_synced.clone();
+    loop {
+        synced.wait_for(|synced| *synced).await.expect("scheduler link");
+        let mut call = tonic::Request::new(request.clone());
+        *call.metadata_mut() = trace.clone();
+        match app.scheduler.clone().admit(call).await {
+            Ok(response) => return Ok(response.into_inner().outcome),
+            Err(status) if is_outage(&status) => {
+                eprintln!("turn {} held: scheduler unavailable: {}", request.turn_id, status.message());
+                tokio::time::sleep(ADMIT_RETRY_DELAY).await;
+            }
+            Err(status) => return Err(status),
+        }
+    }
+}
+
+fn is_outage(status: &Status) -> bool {
+    status.code() == Code::Unavailable || std::error::Error::source(status).is_some_and(|source| source.is::<tonic::transport::Error>())
 }
 
 fn turn_span(engine_class: EngineClass, model: &str, turn_id: &str, run_id: &str) -> tracing::Span {
@@ -159,8 +183,16 @@ fn resolve_run(app: &AppState, headers: &HeaderMap, tool_results: &[String]) -> 
         .unwrap_or_else(|| Uuid::new_v4().to_string())
 }
 
-async fn forward(app: &AppState, ids: TurnIds, route: Route, body: Bytes, timings: TurnTimings, span: tracing::Span) -> Response {
-    app.sink.started(&ids, &route.replica_id);
+async fn forward(
+    app: &AppState,
+    ids: TurnIds,
+    request: &TurnRequest,
+    route: Route,
+    body: Bytes,
+    timings: TurnTimings,
+    span: tracing::Span,
+) -> Response {
+    app.sink.started(&ids, &route.replica_id, request);
     span.record("luftpause.replica", route.replica_id.as_str());
     let upstream = app
         .http

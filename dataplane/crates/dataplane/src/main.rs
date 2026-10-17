@@ -2,9 +2,12 @@ mod auth;
 mod events;
 #[cfg(test)]
 mod failure_tests;
+mod ledger;
 mod observe;
 mod proxy;
 mod report;
+#[cfg(test)]
+mod resync_tests;
 mod run_identity;
 mod telemetry;
 mod turn;
@@ -36,12 +39,14 @@ async fn main() {
         .connect_lazy();
     let scheduler = SchedulerClient::new(channel);
     let (events_tx, events_rx) = mpsc::unbounded_channel();
-    report::spawn(scheduler.clone(), events_rx);
+    let ledger = Arc::new(ledger::RunLedger::default());
+    let scheduler_synced = report::spawn(scheduler.clone(), events_rx, ledger.clone());
 
     let state = AppState {
         scheduler,
+        scheduler_synced,
         http: reqwest::Client::new(),
-        sink: EventSink::new(events_tx),
+        sink: EventSink::new(events_tx, ledger),
         runs: Arc::new(run_identity::RunIndex::new()),
     };
     let token = env::var("LUFTPAUSE_TOKEN").ok().filter(|token| !token.is_empty());

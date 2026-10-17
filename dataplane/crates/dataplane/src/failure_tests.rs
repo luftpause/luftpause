@@ -12,6 +12,7 @@ use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::watch;
 use tokio::time::timeout;
 use tonic::transport::Endpoint;
 use tonic::transport::server::TcpIncoming;
@@ -19,11 +20,12 @@ use tonic::{Request, Response, Status, Streaming};
 
 use crate::auth;
 use crate::events::EventSink;
+use crate::ledger::RunLedger;
 use crate::proto::decision::Outcome;
 use crate::proto::scheduler_client::SchedulerClient;
 use crate::proto::scheduler_server::{Scheduler, SchedulerServer};
 use crate::proto::turn_event::Kind;
-use crate::proto::{Decision, Refuse, ReportAck, Route, TurnEvent, TurnRequest};
+use crate::proto::{Decision, Refuse, ReportAck, ResyncAck, Route, Snapshot, TurnEvent, TurnRequest};
 use crate::proxy::{self, AppState, RUN_ID_HEADER};
 use crate::run_identity::RunIndex;
 
@@ -80,6 +82,10 @@ impl Scheduler for Stub {
     async fn report(&self, _: Request<Streaming<TurnEvent>>) -> Result<Response<ReportAck>, Status> {
         Err(Status::unimplemented("report"))
     }
+
+    async fn resync(&self, _: Request<Snapshot>) -> Result<Response<ResyncAck>, Status> {
+        Err(Status::unimplemented("resync"))
+    }
 }
 
 struct SchedulerStub {
@@ -117,6 +123,7 @@ async fn closed_port() -> String {
 struct Dataplane {
     url: String,
     events: UnboundedReceiver<TurnEvent>,
+    _synced: watch::Sender<bool>,
 }
 
 async fn dataplane(scheduler_url: &str) -> Dataplane {
@@ -126,13 +133,15 @@ async fn dataplane(scheduler_url: &str) -> Dataplane {
 async fn protected_dataplane(scheduler_url: &str, token: Option<&str>) -> Dataplane {
     let channel = Endpoint::from_shared(scheduler_url.to_owned()).expect("scheduler url").connect_lazy();
     let (events_tx, events) = mpsc::unbounded_channel();
+    let (synced, scheduler_synced) = watch::channel(true);
     let state = AppState {
         scheduler: SchedulerClient::new(channel),
+        scheduler_synced,
         http: reqwest::Client::new(),
-        sink: EventSink::new(events_tx),
+        sink: EventSink::new(events_tx, Arc::new(RunLedger::default())),
         runs: Arc::new(RunIndex::new()),
     };
-    Dataplane { url: serve(auth::protect(proxy::router(state), token)).await, events }
+    Dataplane { url: serve(auth::protect(proxy::router(state), token)).await, events, _synced: synced }
 }
 
 impl Dataplane {
@@ -325,13 +334,12 @@ async fn an_unknown_model_is_a_404_with_no_turn_events() {
 }
 
 #[tokio::test]
-async fn an_unreachable_scheduler_is_a_503() {
+async fn an_unreachable_scheduler_holds_the_turn_instead_of_failing_it() {
     let mut dataplane = dataplane(&closed_port().await).await;
 
-    let response = dataplane.chat().await;
+    let held = timeout(Duration::from_millis(2500), dataplane.chat()).await;
 
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
-    assert!(error_message(response).await.starts_with("scheduler: "));
+    assert!(held.is_err(), "the client was answered while the scheduler was unreachable");
     assert_eq!(dataplane.events_through_completion().await, ["completed failed=true"]);
 }
 
