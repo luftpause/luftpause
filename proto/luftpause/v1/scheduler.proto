@@ -64,6 +64,8 @@ message TurnEvent {
     TurnCompleted completed = 6;
     RunEnded run_ended = 7;
   }
+  string trace_id = 8;
+  string span_id = 9;
 }
 
 message TurnStarted {

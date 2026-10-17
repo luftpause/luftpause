@@ -8,7 +8,10 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, post};
 use serde_json::{Value, json};
+use tonic::metadata::MetadataMap;
 use tonic::transport::Channel;
+use tracing::field::Empty;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use uuid::Uuid;
 
 use crate::events::{AdmitGuard, EventSink, TurnIds, now_unix_ms};
@@ -17,6 +20,7 @@ use crate::proto::decision::Outcome;
 use crate::proto::scheduler_client::SchedulerClient;
 use crate::proto::{EngineClass, Refuse, Route, ServiceClass, TurnRequest};
 use crate::run_identity::{RunIndex, tool_result_ids};
+use crate::telemetry;
 use crate::turn::{ObservedBody, TurnContext, TurnTimings};
 
 pub const RUN_ID_HEADER: &str = "x-luftpause-run-id";
@@ -61,12 +65,19 @@ async fn handle(app: AppState, headers: HeaderMap, body: Bytes, engine_class: En
         return error(StatusCode::BAD_REQUEST, "body is not JSON");
     };
     let tool_results = tool_result_ids(&request);
-    let ids = TurnIds { turn_id: Uuid::new_v4().to_string(), run_id: resolve_run(&app, &headers, &tool_results) };
+    let model = request["model"].as_str().unwrap_or_default().to_owned();
+    let turn_id = Uuid::new_v4().to_string();
+    let run_id = resolve_run(&app, &headers, &tool_results);
+    let span = turn_span(engine_class, &model, &turn_id, &run_id);
+    let _ = span.set_parent(telemetry::parent_context(&headers));
+    let trace = span.context();
+    let (trace_id, span_id) = telemetry::trace_ids(&trace);
+    let ids = TurnIds { turn_id, run_id, trace_id, span_id };
     let admit = TurnRequest {
         turn_id: ids.turn_id.clone(),
         run_id: ids.run_id.clone(),
         engine_class: engine_class as i32,
-        model: request["model"].as_str().unwrap_or_default().to_owned(),
+        model,
         at_unix_ms: now_unix_ms(),
         resumed: !tool_results.is_empty(),
         service_class: service_class(&headers) as i32,
@@ -75,6 +86,8 @@ async fn handle(app: AppState, headers: HeaderMap, body: Bytes, engine_class: En
     };
     let guard = AdmitGuard::new(app.sink.clone(), ids.clone());
 
+    let mut admit = tonic::Request::new(admit);
+    *admit.metadata_mut() = MetadataMap::from_headers(telemetry::trace_headers(&trace));
     let decision = match app.scheduler.clone().admit(admit).await {
         Ok(response) => response.into_inner().outcome,
         Err(status) => return error(StatusCode::SERVICE_UNAVAILABLE, &format!("scheduler: {}", status.message())),
@@ -82,15 +95,41 @@ async fn handle(app: AppState, headers: HeaderMap, body: Bytes, engine_class: En
     let timings = TurnTimings { received, routed_after: received.elapsed() };
 
     let mut response = match decision {
-        Some(Outcome::Route(route)) => forward(&app, ids.clone(), route, body, timings).await,
+        Some(Outcome::Route(route)) => forward(&app, ids.clone(), route, body, timings, span.clone()).await,
         Some(Outcome::Refuse(refuse)) => refused(&refuse),
         None => error(StatusCode::SERVICE_UNAVAILABLE, "scheduler returned no decision"),
     };
     guard.disarm();
+    span.record("http.response.status_code", response.status().as_u16());
+    if !response.status().is_success() {
+        span.record("otel.status_code", "error");
+    }
     if let Ok(value) = HeaderValue::from_str(&ids.run_id) {
         response.headers_mut().insert(RUN_ID_HEADER, value);
     }
     response
+}
+
+fn turn_span(engine_class: EngineClass, model: &str, turn_id: &str, run_id: &str) -> tracing::Span {
+    let operation = match engine_class {
+        EngineClass::SinglePass => "decide",
+        _ => "chat",
+    };
+    tracing::info_span!(
+        "turn",
+        otel.name = format!("{operation} {model}"),
+        otel.kind = "server",
+        otel.status_code = Empty,
+        gen_ai.operation.name = operation,
+        gen_ai.request.model = model,
+        gen_ai.usage.input_tokens = Empty,
+        gen_ai.usage.output_tokens = Empty,
+        gen_ai.response.finish_reasons = Empty,
+        http.response.status_code = Empty,
+        luftpause.turn_id = turn_id,
+        luftpause.run_id = run_id,
+        luftpause.replica = Empty,
+    )
 }
 
 fn service_class(headers: &HeaderMap) -> ServiceClass {
@@ -120,11 +159,13 @@ fn resolve_run(app: &AppState, headers: &HeaderMap, tool_results: &[String]) -> 
         .unwrap_or_else(|| Uuid::new_v4().to_string())
 }
 
-async fn forward(app: &AppState, ids: TurnIds, route: Route, body: Bytes, timings: TurnTimings) -> Response {
+async fn forward(app: &AppState, ids: TurnIds, route: Route, body: Bytes, timings: TurnTimings, span: tracing::Span) -> Response {
     app.sink.started(&ids, &route.replica_id);
+    span.record("luftpause.replica", route.replica_id.as_str());
     let upstream = app
         .http
         .post(format!("{}{}", route.base_url.trim_end_matches('/'), engine_path(&route)))
+        .headers(telemetry::trace_headers(&span.context()))
         .header(header::CONTENT_TYPE, "application/json")
         .body(body);
     let upstream = if route.authorization.is_empty() {
@@ -157,6 +198,7 @@ async fn forward(app: &AppState, ids: TurnIds, route: Route, body: Bytes, timing
         timings,
         sink: app.sink.clone(),
         runs: app.runs.clone(),
+        span,
     };
     let body = ObservedBody::new(Box::pin(upstream.bytes_stream()), status.is_success(), format, turn);
 

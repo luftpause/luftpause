@@ -12,6 +12,8 @@ pub struct EventSink(UnboundedSender<TurnEvent>);
 pub struct TurnIds {
     pub turn_id: String,
     pub run_id: String,
+    pub trace_id: String,
+    pub span_id: String,
 }
 
 impl EventSink {
@@ -41,7 +43,8 @@ impl EventSink {
     }
 
     pub fn run_ended(&self, run_id: &str) {
-        self.emit(&TurnIds { turn_id: String::new(), run_id: run_id.to_owned() }, Kind::RunEnded(RunEnded {}));
+        let ids = TurnIds { turn_id: String::new(), run_id: run_id.to_owned(), trace_id: String::new(), span_id: String::new() };
+        self.emit(&ids, Kind::RunEnded(RunEnded {}));
     }
 
     fn emit(&self, ids: &TurnIds, kind: Kind) {
@@ -50,6 +53,8 @@ impl EventSink {
             run_id: ids.run_id.clone(),
             at_unix_ms: now_unix_ms(),
             kind: Some(kind),
+            trace_id: ids.trace_id.clone(),
+            span_id: ids.span_id.clone(),
         });
     }
 }

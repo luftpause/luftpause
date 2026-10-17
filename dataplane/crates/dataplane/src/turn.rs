@@ -8,7 +8,7 @@ use futures_util::Stream;
 use serde_json::json;
 
 use crate::events::{EventSink, TurnIds};
-use crate::observe::{Format, Observer};
+use crate::observe::{Format, Observer, Outcome};
 use crate::run_identity::RunIndex;
 
 type Upstream = Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>;
@@ -24,6 +24,7 @@ pub struct TurnContext {
     pub timings: TurnTimings,
     pub sink: EventSink,
     pub runs: Arc<RunIndex>,
+    pub span: tracing::Span,
 }
 
 pub struct ObservedBody {
@@ -86,6 +87,7 @@ impl ObservedBody {
             self.mark_first_token();
         }
         self.turn.sink.completed(&self.turn.ids, &outcome, failed);
+        record_outcome(&self.turn.span, &outcome, failed);
         println!(
             "{}",
             json!({
@@ -141,6 +143,17 @@ impl Stream for ObservedBody {
 impl Drop for ObservedBody {
     fn drop(&mut self) {
         self.finish(true);
+    }
+}
+
+fn record_outcome(span: &tracing::Span, outcome: &Outcome, failed: bool) {
+    span.record("gen_ai.usage.input_tokens", outcome.prompt_tokens);
+    span.record("gen_ai.usage.output_tokens", outcome.completion_tokens);
+    if let Some(finish_reason) = &outcome.finish_reason {
+        span.record("gen_ai.response.finish_reasons", finish_reason.as_str());
+    }
+    if failed {
+        span.record("otel.status_code", "error");
     }
 }
 

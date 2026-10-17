@@ -5,6 +5,7 @@ mod observe;
 mod proxy;
 mod report;
 mod run_identity;
+mod telemetry;
 mod turn;
 
 mod proto {
@@ -24,6 +25,7 @@ use proxy::AppState;
 
 #[tokio::main]
 async fn main() {
+    let _tracer_provider = telemetry::init();
     let listen = env::var("LISTEN_ADDR").unwrap_or_else(|_| "0.0.0.0:8080".to_owned());
     let scheduler_url = env::var("SCHEDULER_URL").unwrap_or_else(|_| "http://localhost:5000".to_owned());
 
