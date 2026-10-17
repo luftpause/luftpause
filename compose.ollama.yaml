@@ -1,0 +1,16 @@
+services:
+  scheduler:
+    environment: !override
+      Engines__Generative__0__Id: ollama
+      Engines__Generative__0__BaseUrl: http://host.docker.internal:11434
+      Engines__Generative__0__Models__0: ${OLLAMA_MODEL:-llama3.2:1b}
+      Engines__Generative__0__HealthPath: /
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  dataplane:
+    extra_hosts: ["host.docker.internal:host-gateway"]
+
+  runtime:
+    environment:
+      Runtime__Model: ${OLLAMA_MODEL:-llama3.2:1b}
+      Runtime__DecideModel: ${OLLAMA_MODEL:-llama3.2:1b}

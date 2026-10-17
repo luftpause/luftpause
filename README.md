@@ -35,9 +35,18 @@ claude mcp add --transport http --scope local luftpause http://localhost:7000/mc
 ```
 
 Claude Code now has `spawn`, `await`, `status`, `cancel` and `tools`. The fake
-engines answer with filler — enough to see the fan-out. For real answers put a
-model behind it: SGLang on your GPU (`compose.testbed.yaml`) or any
-OpenAI-compatible endpoint (`compose.runpod.yaml` shows a hosted vLLM pod).
+engines answer with filler — enough to see the fan-out. For real answers from
+an Ollama already on your machine:
+
+```bash
+docker compose -f compose.yaml -f compose.ollama.yaml up -d scheduler dataplane runtime fake-mcp
+```
+
+Ollama needs the model pulled (`ollama pull llama3.2:1b`, or set `OLLAMA_MODEL`)
+and must listen beyond loopback (`OLLAMA_HOST=0.0.0.0`) unless Docker Desktop
+already reaches it. SGLang on your GPU (`compose.testbed.yaml`) or any
+OpenAI-compatible endpoint (`compose.runpod.yaml` shows a hosted vLLM pod) work
+the same way.
 
 ## How it differs
 
@@ -159,6 +168,12 @@ budget is spent. What is left:
 docker compose up -d --build                     # scheduler, dataplane, runtime, fake engines, fake MCP tools
 dotnet run --project tools/loadgen -- --spawn 10 # fan 10 sub-agents out over MCP and await them
 dotnet run --project tools/loadgen -- --agents 8 --duration-s 60 --class batch --caller me # 8 own-loop agents through the proxy, closed loop
+```
+
+An Ollama on the host as the only replica (model from `OLLAMA_MODEL`, default `llama3.2:1b`):
+
+```bash
+docker compose -f compose.yaml -f compose.ollama.yaml up -d scheduler dataplane runtime fake-mcp
 ```
 
 On one GPU, two SGLang replicas of Llama-3.2-1B FP8 (the test bed used below):
