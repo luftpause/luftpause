@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Luftpause.Scheduler;
 using Luftpause.Scheduling;
 
@@ -7,6 +8,7 @@ builder.WebHost.ConfigureKestrel(kestrel => kestrel.Limits.Http2.MaxStreamsPerCo
 var topology = builder.Configuration.GetSection("Engines").Get<EngineTopology>() ?? new EngineTopology();
 
 builder.Services.AddGrpc();
+builder.Services.ConfigureHttpJsonOptions(json => json.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton(topology);
 builder.Services.AddSingleton(topology.Credentials(Environment.GetEnvironmentVariable));
@@ -24,6 +26,9 @@ builder.Services.AddHostedService<LoadProbe>();
 var app = builder.Build();
 
 app.MapGrpcService<SchedulerService>();
+app.MapGet("/", () => Results.Content(StatusPage.Html, "text/html; charset=utf-8"));
+app.MapGet("/status", (StateStore store, TimeProvider time) =>
+    StatusView.From(store.Current, time.GetUtcNow().ToUnixTimeMilliseconds()));
 
 app.Run();
 
