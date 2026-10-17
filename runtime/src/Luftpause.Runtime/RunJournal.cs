@@ -15,7 +15,7 @@ public sealed record RunSpawned(string Handle, RunSpec Spec, DateTimeOffset Star
 
 public sealed record RunTurned(string Handle, IReadOnlyList<JsonObject> NewMessages, RunWork Work) : JournalRecord(Handle);
 
-public sealed record RunFinished(string Handle, RunOutcome Outcome, DateTimeOffset FinishedAt) : JournalRecord(Handle);
+public sealed record RunFinished(string Handle, RunOutcome Outcome, DateTimeOffset FinishedAt, BudgetOverrun? Exceeded = null) : JournalRecord(Handle);
 
 public sealed record ReplayedRun(RunSpawned Spawned, IReadOnlyList<RunTurned> Turns, RunFinished? Finished)
 {
@@ -36,6 +36,7 @@ public sealed record ReplayedRun(RunSpawned Spawned, IReadOnlyList<RunTurned> Tu
         {
             Messages = [.. AgentLoop.InitialMessages(Spawned.Spec), .. Turns.SelectMany(t => t.NewMessages)],
             Work = Turns.Count > 0 ? Turns[^1].Work : RunWork.None,
+            Exceeded = Finished?.Exceeded,
         };
         if (Finished is not null)
         {

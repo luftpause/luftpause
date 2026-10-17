@@ -16,7 +16,6 @@ public sealed class RunRegistry(
             throw new InvalidOperationException($"unknown parent handle '{parent}'");
         var record = new RunRecord($"run-{Guid.NewGuid():N}", spec, time.GetUtcNow(), new CancellationTokenSource(), parent);
         journal.Append(new RunSpawned(record.Handle, spec, record.Started, parent));
-        Adopt(record);
         Start(record, parent is null ? Activity.Current?.Context ?? default : runs[parent].Trace);
         return record;
     }
@@ -26,11 +25,10 @@ public sealed class RunRegistry(
         foreach (var replayed in ReplayedRun.From(history))
         {
             var record = replayed.Record();
-            Adopt(record);
             if (replayed.Finished is null)
                 Start(record, record.Parent is { } parent && runs.TryGetValue(parent, out var parentRecord) ? parentRecord.Trace : default);
             else
-                runs[record.Handle] = record;
+                Adopt(record);
         }
     }
 
@@ -40,7 +38,8 @@ public sealed class RunRegistry(
 
     public IReadOnlyList<string> Children(string handle) => children.GetValueOrDefault(handle, []);
 
-    public RunView View(RunRecord record, DateTimeOffset now) => record.View(now, Children(record.Handle));
+    public RunView View(RunRecord record, DateTimeOffset now) =>
+        record.View(now, Children(record.Handle)) with { Budget = BudgetOf(record, now) };
 
     public bool Cancel(string handle)
     {
@@ -49,9 +48,46 @@ public sealed class RunRegistry(
         var childCancelled = Children(handle).Select(Cancel).Count(cancelled => cancelled) > 0;
         if (record.Completion.IsCompleted)
             return childCancelled;
-        record.Cancel.Cancel();
+        record.Stop("cancelled");
         return true;
     }
+
+    private BudgetView? BudgetOf(RunRecord record, DateTimeOffset now) =>
+        record.Spec.Budget is { } limits
+            ? new BudgetView(limits, BudgetUsed.Of(SubtreeTotals(record), record.ElapsedSeconds(now)), record.Exceeded)
+            : null;
+
+    private WorkTotals SubtreeTotals(RunRecord record) =>
+        Children(record.Handle).Select(child => SubtreeTotals(runs[child])).Aggregate(WorkTotals.Of(record.Work), (total, child) => total.Plus(child));
+
+    private IEnumerable<RunRecord> SelfAndAncestors(RunRecord record)
+    {
+        for (RunRecord? current = record; current is not null; current = current.Parent is { } parent ? runs[parent] : null)
+            yield return current;
+    }
+
+    private void Enforce(RunRecord record)
+    {
+        var now = time.GetUtcNow();
+        foreach (var budgeted in SelfAndAncestors(record))
+            if (budgeted.Spec.Budget is { } limits && Budget.Check(limits, SubtreeTotals(budgeted), budgeted.ElapsedSeconds(now)) is { } overrun)
+                StopSubtree(budgeted, budgeted.Exceed(overrun).Describe());
+    }
+
+    private void StopSubtree(RunRecord record, string reason)
+    {
+        foreach (var child in Children(record.Handle))
+            StopSubtree(runs[child], reason);
+        if (record.Finished is null)
+            record.Stop(reason);
+    }
+
+    private ITimer? Deadline(RunRecord record) =>
+        record.Spec.Budget?.Seconds is { } seconds
+            ? time.CreateTimer(
+                _ => Enforce(record), null,
+                TimeSpan.FromSeconds(Math.Max(seconds - record.ElapsedSeconds(time.GetUtcNow()), 0)), Timeout.InfiniteTimeSpan)
+            : null;
 
     public async Task<IReadOnlyList<RunView>> AwaitAsync(
         IReadOnlyList<string> handles, bool all, TimeSpan timeout, IProgress<RunView> progress, CancellationToken cancel)
@@ -94,18 +130,21 @@ public sealed class RunRegistry(
 
     private void Adopt(RunRecord record)
     {
+        runs[record.Handle] = record;
         if (record.Parent is { } parent)
             children.AddOrUpdate(parent, _ => [record.Handle], (_, siblings) => siblings.Add(record.Handle));
     }
 
     private void Start(RunRecord record, ActivityContext parentTrace)
     {
-        runs[record.Handle] = record;
+        Adopt(record);
         record.Completion = ExecuteAsync(record, parentTrace);
+        Enforce(record);
     }
 
     private async Task<RunOutcome> ExecuteAsync(RunRecord record, ActivityContext parentTrace)
     {
+        using var deadline = Deadline(record);
         using var activity = Tracing.Source.StartActivity("invoke_agent", ActivityKind.Internal, parentTrace, GenAiTags.Run(record.Handle, record.Spec));
         record.Trace = activity?.Context ?? default;
         var outcome = await OutcomeAsync(record);
@@ -114,7 +153,7 @@ public sealed class RunRegistry(
             activity?.SetStatus(ActivityStatusCode.Error, outcome.Error);
         var finishedAt = time.GetUtcNow();
         record.Finished = finishedAt;
-        journal.Append(new RunFinished(record.Handle, outcome, finishedAt));
+        journal.Append(new RunFinished(record.Handle, outcome, finishedAt, record.Exceeded));
         await EndAsync(record.Handle);
         return outcome;
     }
@@ -122,6 +161,7 @@ public sealed class RunRegistry(
     private void Progress(RunRecord record, RunProgress progress)
     {
         record.Work = progress.Work;
+        Enforce(record);
         if (progress.NewMessages.Count == 0)
             return;
         journal.Append(new RunTurned(record.Handle, progress.NewMessages, progress.Work));
@@ -151,7 +191,7 @@ public sealed class RunRegistry(
         }
         catch (OperationCanceledException)
         {
-            return new RunOutcome(RunStatus.Cancelled, null, "cancelled");
+            return new RunOutcome(RunStatus.Cancelled, null, record.CancelReason ?? "cancelled");
         }
         catch (Exception e)
         {
