@@ -350,6 +350,10 @@ through `POST /v1/decide`. Single-pass turns are placed on their own replicas an
 never enter run state, so they neither hold nor wait for a generative slot. For a label set
 the classifier was not trained on, `decide(labels: [...])` scores the labels from a
 generative replica's first-token logprobs instead, at the cost of one one-token turn.
+On the 1B test bed it sorts "the server returned 500 three times and the on-call
+phone is ringing" into `urgent` at 0.89 and a population question into `lookup` at
+0.99, but also calls "2 + 2" and "thanks, that's all" `lookup`: the mechanism works,
+the 1B model leans on the first label. Use a larger model or calibrate the scores.
 
 | Load | Latency at the data plane |
 |---|---|
