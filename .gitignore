@@ -3,3 +3,4 @@ obj/
 target/
 .vs/
 *.user
+tools/bench/out/
