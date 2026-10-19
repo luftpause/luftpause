@@ -12,7 +12,6 @@
     {
       "registryType": "oci",
       "identifier": "ghcr.io/luftpause/runtime:v0.1.2",
-      "version": "0.1.2",
       "transport": {
         "type": "streamable-http",
         "url": "http://localhost:7000/mcp"
