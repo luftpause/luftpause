@@ -38,7 +38,7 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
     [McpServerTool(Name = "run"), Description(
         "Spawn a sub-agent run and wait in the same call until it finishes; takes the same arguments as spawn and returns the run as await does. " +
         "Clients that opt into MCP Tasks get a task to poll instead, and an approval inside the run arrives as the task's input request. " +
-        "Other clients are asked approvals the way await asks them; without elicitation the call returns the run with status AwaitingApproval.")]
+        "Other clients are asked approvals the way await asks them; without elicitation the call returns the run with status AwaitingApproval. Cancelling the call cancels the run.")]
     public async Task<RunView> Run(
         McpServer server,
         RequestContext<CallToolRequestParams> context,

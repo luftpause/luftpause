@@ -112,7 +112,7 @@ public sealed class AgentLoopApprovalTests : IAsyncLifetime
         var (outcome, asked, progress) = await RunAsync(true, Spec, "drop");
 
         var request = Assert.Single(asked);
-        Assert.Equal(("drop", """{"table":"users"}"""), (request.Tool, request.Arguments!.ToJsonString()));
+        Assert.Equal(("drop", """{"table":"users"}"""), (request.Tool, request.Arguments.ToJsonString()));
         Assert.Equal("dropped users", LastToolResult(progress));
         Assert.Equal(before + 1, TableTools.Dropped);
         Assert.Equal("done", outcome.Answer);

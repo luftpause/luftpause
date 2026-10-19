@@ -18,7 +18,7 @@ public sealed record RunTurned(string Handle, IReadOnlyList<JsonObject> NewMessa
 
 public sealed record RunFinished(string Handle, RunOutcome Outcome, DateTimeOffset FinishedAt, BudgetOverrun? Exceeded = null) : JournalRecord(Handle);
 
-public sealed record RunApprovalDecided(string Handle, string Tool, JsonNode? Arguments, bool Allow) : JournalRecord(Handle);
+public sealed record RunApprovalDecided(string Handle, string Tool, JsonNode Arguments, bool Allow) : JournalRecord(Handle);
 
 public sealed record ReplayedRun(RunSpawned Spawned, IReadOnlyList<RunTurned> Turns, RunFinished? Finished, IReadOnlyList<RunApprovalDecided> OpenDecisions)
 {

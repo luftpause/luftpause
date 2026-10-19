@@ -7,7 +7,7 @@ namespace Luftpause.Runtime.Tests;
 public sealed class RunApprovalTests : IDisposable
 {
     private static readonly RunSpec Spec = new("task", "model", "interactive", null, 4);
-    private static readonly ApprovalRequest Drop = new("drop", JsonNode.Parse("""{"table":"users"}"""));
+    private static readonly ApprovalRequest Drop = new("drop", JsonNode.Parse("""{"table":"users"}""")!);
 
     private readonly string path = Path.Combine(Path.GetTempPath(), $"runs-{Guid.NewGuid():N}.jsonl");
     private RunJournal? journal;
@@ -74,7 +74,7 @@ public sealed class RunApprovalTests : IDisposable
 
         Assert.Equal(RunStatus.AwaitingApproval, view.Status);
         Assert.Equal("drop", view.PendingApproval!.Tool);
-        Assert.Equal("""{"table":"users"}""", view.PendingApproval.Arguments!.ToJsonString());
+        Assert.Equal("""{"table":"users"}""", view.PendingApproval.Arguments.ToJsonString());
         Assert.False(record.Completion.IsCompleted);
     }
 
@@ -118,7 +118,7 @@ public sealed class RunApprovalTests : IDisposable
 
         var decided = Assert.Single(RunJournal.Replay(path).OfType<RunApprovalDecided>());
         Assert.Equal((record.Handle, "drop", false), (decided.Handle, decided.Tool, decided.Allow));
-        Assert.Equal("""{"table":"users"}""", decided.Arguments!.ToJsonString());
+        Assert.Equal("""{"table":"users"}""", decided.Arguments.ToJsonString());
     }
 
     [Fact]

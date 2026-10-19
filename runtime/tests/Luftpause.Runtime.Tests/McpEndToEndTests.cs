@@ -15,7 +15,7 @@ namespace Luftpause.Runtime.Tests;
 
 public sealed class McpEndToEndTests : IAsyncLifetime
 {
-    private static readonly ApprovalRequest Drop = new("drop", System.Text.Json.Nodes.JsonNode.Parse("""{"table":"users"}"""));
+    private static readonly ApprovalRequest Drop = new("drop", System.Text.Json.Nodes.JsonNode.Parse("""{"table":"users"}""")!);
 
     private readonly GatedLoop loop = new();
     private readonly string path = Path.Combine(Path.GetTempPath(), $"runs-{Guid.NewGuid():N}.jsonl");
@@ -286,7 +286,7 @@ public sealed class McpEndToEndTests : IAsyncLifetime
         var taskId = created.TaskCreated!.TaskId;
         var waiting = await PollAsync<InputRequiredTaskResult>(taskId);
         var (key, request) = Assert.Single(waiting.InputRequests!);
-        await client.UpdateTaskAsync(new UpdateTaskRequestParams
+        await client!.UpdateTaskAsync(new UpdateTaskRequestParams
         {
             TaskId = taskId,
             InputResponses = new Dictionary<string, ModelContextProtocol.Protocol.InputResponse>

@@ -9,7 +9,7 @@ public static class ApprovalPrompt
 
     public static ElicitRequestParams Request(string handle, ApprovalRequest request) => new()
     {
-        Message = $"luftpause run {handle} wants to call the tool '{request.Tool}' with {request.Arguments?.ToJsonString() ?? "{}"}. Allow this call?",
+        Message = $"luftpause run {handle} wants to call the tool '{request.Tool}' with {request.Arguments.ToJsonString()}. Allow this call?",
         RequestedSchema = new ElicitRequestParams.RequestSchema
         {
             Properties = new Dictionary<string, ElicitRequestParams.PrimitiveSchemaDefinition>

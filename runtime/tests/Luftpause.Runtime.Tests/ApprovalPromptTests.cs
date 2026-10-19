@@ -6,7 +6,7 @@ namespace Luftpause.Runtime.Tests;
 
 public sealed class ApprovalPromptTests
 {
-    private static readonly ApprovalRequest Drop = new("drop", JsonNode.Parse("""{"table":"users"}"""));
+    private static readonly ApprovalRequest Drop = new("drop", JsonNode.Parse("""{"table":"users"}""")!);
 
     private static ElicitResult Result(string action, string? allow) => new()
     {

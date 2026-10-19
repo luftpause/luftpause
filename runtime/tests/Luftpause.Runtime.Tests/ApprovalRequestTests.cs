@@ -17,7 +17,7 @@ public sealed class ApprovalRequestTests
         var request = ApprovalRequest.Of(Call("""{"table":"users"}"""));
 
         Assert.Equal("drop", request.Tool);
-        Assert.Equal("""{"table":"users"}""", request.Arguments!.ToJsonString());
+        Assert.Equal("""{"table":"users"}""", request.Arguments.ToJsonString());
     }
 
     [Fact]
@@ -25,12 +25,12 @@ public sealed class ApprovalRequestTests
     {
         var request = ApprovalRequest.Of(Call("table=users"));
 
-        Assert.Equal("table=users", request.Arguments!.GetValue<string>());
+        Assert.Equal("table=users", request.Arguments.GetValue<string>());
     }
 
     [Fact]
     public void Empty_arguments_are_an_empty_object() =>
-        Assert.Equal("{}", ApprovalRequest.Of(Call("")).Arguments!.ToJsonString());
+        Assert.Equal("{}", ApprovalRequest.Of(Call("")).Arguments.ToJsonString());
 
     [Fact]
     public void A_decision_matches_the_same_tool_and_equal_arguments_only()

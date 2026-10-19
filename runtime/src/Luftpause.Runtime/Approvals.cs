@@ -3,7 +3,7 @@ using System.Text.Json.Nodes;
 
 namespace Luftpause.Runtime;
 
-public sealed record ApprovalRequest(string Tool, JsonNode? Arguments)
+public sealed record ApprovalRequest(string Tool, JsonNode Arguments)
 {
     public static ApprovalRequest Of(JsonObject toolCall) =>
         new(toolCall["function"]?["name"]?.GetValue<string>() ?? "", Parsed(toolCall["function"]?["arguments"]?.GetValue<string>()));
