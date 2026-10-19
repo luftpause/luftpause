@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
+using ModelContextProtocol.Extensions.Tasks;
 
 namespace Luftpause.Runtime.Tests;
 
@@ -18,6 +19,8 @@ public sealed class McpEndToEndTests : IAsyncLifetime
 
     private readonly GatedLoop loop = new();
     private readonly string path = Path.Combine(Path.GetTempPath(), $"runs-{Guid.NewGuid():N}.jsonl");
+    private readonly string taskPath = Path.Combine(Path.GetTempPath(), $"tasks-{Guid.NewGuid():N}.jsonl");
+    private TaskJournal? tasks;
     private WebApplication? app;
     private McpClient? client;
 
@@ -68,7 +71,8 @@ public sealed class McpEndToEndTests : IAsyncLifetime
         builder.Services.AddSingleton(_ => new RunJournal(path));
         builder.Services.AddSingleton<IReadOnlyList<JournalRecord>>([]);
         builder.Services.AddSingleton<RunRegistry>();
-        builder.Services.AddLuftpauseMcp();
+        tasks = new TaskJournal(taskPath, TimeProvider.System);
+        builder.Services.AddLuftpauseMcp(tasks);
         app = builder.Build();
         app.MapMcp("/mcp");
         await app.StartAsync();
@@ -98,7 +102,9 @@ public sealed class McpEndToEndTests : IAsyncLifetime
             await client.DisposeAsync();
         await app!.StopAsync();
         await app.DisposeAsync();
+        tasks!.Dispose();
         File.Delete(path);
+        File.Delete(taskPath);
     }
 
     private async Task<string> SpawnAsync(string task = "t")
@@ -246,5 +252,84 @@ public sealed class McpEndToEndTests : IAsyncLifetime
         Assert.Equal("drop", status.GetProperty("pendingApproval").GetProperty("tool").GetString());
         Assert.True(approved.GetProperty("decided").GetBoolean());
         Assert.Equal("dropped", finished.GetProperty("answer").GetString());
+    }
+
+    private static Dictionary<string, JsonElement> DropTask() => new() { ["task"] = JsonSerializer.SerializeToElement("drop") };
+
+    private static RunView? RunOf(ModelContextProtocol.Protocol.CallToolResult result) =>
+        JsonSerializer.Deserialize<RunView>(Text(result), new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() },
+        });
+
+    private async Task<T> PollAsync<T>(string taskId) where T : GetTaskResult
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (true)
+        {
+            if (await client!.GetTaskAsync(taskId) is T reached)
+                return reached;
+            Assert.True(DateTime.UtcNow < deadline, $"task {taskId} never reached {typeof(T).Name}");
+            await Task.Delay(20);
+        }
+    }
+
+    [Theory]
+    [InlineData(true, "dropped")]
+    [InlineData(false, "kept")]
+    public async Task A_client_opted_into_tasks_gets_a_task_answers_its_approval_through_tasks_update_and_gets_the_result(bool allow, string answer)
+    {
+        await ConnectAsync("2026-07-28");
+
+        var created = await client!.CallToolAsTaskAsync(new ModelContextProtocol.Protocol.CallToolRequestParams { Name = "run", Arguments = DropTask() });
+        Assert.True(created.IsTask);
+        var taskId = created.TaskCreated!.TaskId;
+        var waiting = await PollAsync<InputRequiredTaskResult>(taskId);
+        var (key, request) = Assert.Single(waiting.InputRequests!);
+        await client.UpdateTaskAsync(new UpdateTaskRequestParams
+        {
+            TaskId = taskId,
+            InputResponses = new Dictionary<string, ModelContextProtocol.Protocol.InputResponse>
+            {
+                [key] = ModelContextProtocol.Protocol.InputResponse.FromElicitResult(new ModelContextProtocol.Protocol.ElicitResult
+                {
+                    Action = "accept",
+                    Content = new Dictionary<string, JsonElement> { ["allow"] = JsonSerializer.SerializeToElement(allow) },
+                }),
+            },
+        });
+        var completed = await PollAsync<CompletedTaskResult>(taskId);
+
+        Assert.Equal("elicitation/create", request.Method);
+        Assert.Contains("drop", request.ElicitationParams!.Message);
+        var result = completed.Result.Deserialize<ModelContextProtocol.Protocol.CallToolResult>(McpJsonUtilities.DefaultOptions)!;
+        Assert.Equal((RunStatus.Completed, answer), (RunOf(result)!.Status, RunOf(result)!.Answer));
+        Assert.Equal(McpTaskStatus.Completed, (await tasks!.GetTaskAsync(taskId))!.Status);
+    }
+
+    [Theory]
+    [InlineData("2025-11-25")]
+    [InlineData("2026-07-28")]
+    public async Task Run_without_tasks_blocks_until_the_run_is_done_and_spawns_it_once(string protocolVersion)
+    {
+        var asked = new List<ModelContextProtocol.Protocol.ElicitRequestParams>();
+        await ConnectAsync(protocolVersion, handlers: Answering(true, asked));
+
+        var result = await client!.CallToolAsync("run", new Dictionary<string, object?> { ["task"] = "drop" });
+
+        Assert.Equal((RunStatus.Completed, "dropped"), (RunOf(result)!.Status, RunOf(result)!.Answer));
+        Assert.Single(asked);
+        Assert.Single(app!.Services.GetRequiredService<RunRegistry>().All);
+    }
+
+    [Fact]
+    public async Task Run_for_a_client_without_elicitation_returns_the_pending_approval()
+    {
+        await ConnectAsync("2025-11-25");
+
+        var result = await client!.CallToolAsync("run", new Dictionary<string, object?> { ["task"] = "drop" });
+
+        var run = RunOf(result)!;
+        Assert.Equal((RunStatus.AwaitingApproval, "drop"), (run.Status, run.PendingApproval!.Tool));
     }
 }

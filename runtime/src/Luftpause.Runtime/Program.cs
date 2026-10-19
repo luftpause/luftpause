@@ -27,7 +27,7 @@ builder.Services.AddSingleton<IRunLoop, AgentLoop>();
 builder.Services.AddSingleton(RunJournal.Replay(journalPath));
 builder.Services.AddSingleton(_ => new RunJournal(journalPath));
 builder.Services.AddSingleton<RunRegistry>();
-builder.Services.AddLuftpauseMcp();
+builder.Services.AddLuftpauseMcp(new TaskJournal(Path.Combine(stateDir, "tasks.jsonl"), TimeProvider.System));
 builder.Services.AddCors();
 builder.Services.ConfigureHttpJsonOptions(json => json.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 

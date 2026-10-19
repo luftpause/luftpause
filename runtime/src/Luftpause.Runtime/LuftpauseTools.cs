@@ -31,14 +31,61 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         [Description("Prompt plus completion tokens this run and every run under it may use; over it, the subtree is cancelled.")] long? budgetTokens = null,
         [Description("Tool calls this run and every run under it may make; over it, the subtree is cancelled.")] int? budgetToolCalls = null,
         [Description("Wall-clock seconds this run may take, its subtree included; when they pass, the subtree is cancelled.")] double? budgetSeconds = null,
-        [Description("Tools whose every call waits for the user's approval, on top of tools their server marks destructive.")] string[]? approveTools = null)
+        [Description("Tools whose every call waits for the user's approval, on top of tools their server marks destructive.")] string[]? approveTools = null) =>
+        new { handle = Start(server, task, model, serviceClass, system, maxToolCalls, tools, maxTokens, parallelToolCalls, parent,
+            budgetTokens, budgetToolCalls, budgetSeconds, approveTools) };
+
+    [McpServerTool(Name = "run"), Description(
+        "Spawn a sub-agent run and wait in the same call until it finishes; takes the same arguments as spawn and returns the run as await does. " +
+        "Clients that opt into MCP Tasks get a task to poll instead, and an approval inside the run arrives as the task's input request. " +
+        "Other clients are asked approvals the way await asks them; without elicitation the call returns the run with status AwaitingApproval.")]
+    public async Task<RunView> Run(
+        McpServer server,
+        RequestContext<CallToolRequestParams> context,
+        IProgress<ProgressNotificationValue> progress,
+        [Description("What the sub-agent should do.")] string task,
+        [Description("Model to run on; defaults to the runtime's model.")] string? model = null,
+        [Description("interactive (default) or batch. Batch runs yield to interactive ones.")] string serviceClass = "interactive",
+        [Description("Optional system prompt for the sub-agent.")] string? system = null,
+        [Description("Tool calls allowed before the sub-agent must answer without tools.")] int maxToolCalls = 8,
+        [Description("Names of the tools this run may use; all configured tools when omitted.")] string[]? tools = null,
+        [Description("Longest reply per model turn, in tokens; 0 leaves it to the engine. Engines that reserve memory per request (SGLang) batch far fewer requests without it.")] int maxTokens = 256,
+        [Description("Let the model ask for several tool calls in one reply, run at once. Off by default: Llama 3.x takes one call per reply.")] bool parallelToolCalls = false,
+        [Description("Handle of the run this one belongs to; cancelling the parent cancels it.")] string? parent = null,
+        [Description("Prompt plus completion tokens this run and every run under it may use; over it, the subtree is cancelled.")] long? budgetTokens = null,
+        [Description("Tool calls this run and every run under it may make; over it, the subtree is cancelled.")] int? budgetToolCalls = null,
+        [Description("Wall-clock seconds this run may take, its subtree included; when they pass, the subtree is cancelled.")] double? budgetSeconds = null,
+        [Description("Tools whose every call waits for the user's approval, on top of tools their server marks destructive.")] string[]? approveTools = null,
+        CancellationToken cancellationToken = default)
+    {
+        var handle = context.Params?.RequestState is { } resumed
+            ? runs.Find(resumed)?.Handle ?? throw new McpException($"unknown run '{resumed}' in requestState")
+            : Start(server, task, model, serviceClass, system, maxToolCalls, tools, maxTokens, parallelToolCalls, parent,
+                budgetTokens, budgetToolCalls, budgetSeconds, approveTools);
+        ApprovalDelivery.Answer(runs, [handle], context.Params?.InputResponses);
+        try
+        {
+            var views = await runs.AwaitAsync([handle], true, Timeout.InfiniteTimeSpan, new AwaitProgress(progress),
+                ApprovalDelivery.Asker(server, context, ApprovalDelivery.TaskOptIn(context), handle), cancellationToken);
+            return views.Single();
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            runs.Cancel(handle);
+            throw;
+        }
+    }
+
+    private string Start(
+        McpServer server, string task, string? model, string serviceClass, string? system, int maxToolCalls, string[]? tools, int maxTokens,
+        bool parallelToolCalls, string? parent, long? budgetTokens, int? budgetToolCalls, double? budgetSeconds, string[]? approveTools)
     {
         var allowed = tools is { Length: > 0 } ? tools.ToHashSet(StringComparer.Ordinal) : null;
         try
         {
             var spec = new RunSpec(task, model ?? defaults.Model, serviceClass, system, Math.Max(maxToolCalls, 0), allowed, maxTokens > 0 ? maxTokens : null, parallelToolCalls, server.SessionId,
                 BudgetLimits.Of(budgetTokens, budgetToolCalls, budgetSeconds), approveTools is { Length: > 0 } ? approveTools.ToHashSet(StringComparer.Ordinal) : null);
-            return new { handle = runs.Spawn(spec, parent).Handle };
+            return runs.Spawn(spec, parent).Handle;
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException)
         {
