@@ -38,12 +38,16 @@ claude mcp add --transport http --scope local luftpause http://localhost:7000/mc
 `docker compose up -d` pulls the published images; add `--build` to build them from source instead (first build takes a few minutes). It pulls `latest`; pin a release with `LUFTPAUSE_VERSION=v0.1.3 docker compose up -d`. The runtime is also listed in the [official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=luftpause) as `io.github.vmedvedovskiy/luftpause`.
 
 Claude Code now has `spawn`, `await`, `run`, `status`, `cancel`, `approve`, `tools` and `decide`. The fake
-engines answer with filler — enough to see the fan-out. For real answers from
-an Ollama already on your machine:
+engines answer with filler, and the sub-agents' only tools are `fake-mcp`'s `lookup` and `deep_search`,
+which wait a random second or so and return filler too — enough to see the fan-out. For real answers from
+an Ollama already on your machine, with Wikipedia as a real tool beside the fake ones:
 
 ```bash
 docker compose -f compose.yaml -f compose.ollama.yaml up -d scheduler dataplane runtime fake-mcp
 ```
+
+Pass `tools: ["get_summary", "search_wikipedia"]` to `spawn` to keep a sub-agent on Wikipedia. Wikipedia's API rate-limits
+anonymous callers, so a tool call can take tens of seconds while `wikipedia-mcp` retries.
 
 Ollama needs the model pulled (`ollama pull llama3.2:1b`, or set `OLLAMA_MODEL`)
 and must listen beyond loopback (`OLLAMA_HOST=0.0.0.0`) unless Docker Desktop

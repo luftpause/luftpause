@@ -14,3 +14,7 @@ services:
     environment:
       Runtime__Model: ${OLLAMA_MODEL:-llama3.2:1b}
       Runtime__DecideModel: ${OLLAMA_MODEL:-llama3.2:1b}
+      Tools__Servers__1__Name: wikipedia
+      Tools__Servers__1__Command: /opt/tools/bin/wikipedia-mcp
+      Tools__Servers__1__Args__0: --transport
+      Tools__Servers__1__Args__1: stdio
