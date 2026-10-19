@@ -14,6 +14,8 @@ namespace Luftpause.Runtime.Tests;
 
 public sealed class McpEndToEndTests : IAsyncLifetime
 {
+    private static readonly ApprovalRequest Drop = new("drop", System.Text.Json.Nodes.JsonNode.Parse("""{"table":"users"}"""));
+
     private readonly GatedLoop loop = new();
     private readonly string path = Path.Combine(Path.GetTempPath(), $"runs-{Guid.NewGuid():N}.jsonl");
     private WebApplication? app;
@@ -33,6 +35,8 @@ public sealed class McpEndToEndTests : IAsyncLifetime
 
         public async Task<RunOutcome> RunAsync(RunStart start, Action<RunProgress> report, CancellationToken cancel)
         {
+            if (start.Spec.Task == "drop")
+                return new RunOutcome(RunStatus.Completed, await start.Approve(Drop, cancel) ? "dropped" : "kept", null);
             Started.TrySetResult(start);
             await Step.WaitAsync(cancel);
             report(new RunProgress(RunWork.None with { Turns = 1 }, []));
@@ -80,12 +84,12 @@ public sealed class McpEndToEndTests : IAsyncLifetime
         }
     }
 
-    private async Task ConnectAsync(string protocolVersion, HttpClient? http = null)
+    private async Task ConnectAsync(string protocolVersion, HttpClient? http = null, McpClientHandlers? handlers = null)
     {
         var options = new HttpClientTransportOptions { Endpoint = new Uri($"{app!.Urls.Single()}/mcp") };
         client = await McpClient.CreateAsync(
             http is null ? new HttpClientTransport(options) : new HttpClientTransport(options, http, ownsHttpClient: true),
-            new McpClientOptions { ProtocolVersion = protocolVersion });
+            new McpClientOptions { ProtocolVersion = protocolVersion, Handlers = handlers ?? new McpClientHandlers() });
     }
 
     public async Task DisposeAsync()
@@ -97,11 +101,34 @@ public sealed class McpEndToEndTests : IAsyncLifetime
         File.Delete(path);
     }
 
-    private async Task<string> SpawnAsync()
+    private async Task<string> SpawnAsync(string task = "t")
     {
-        var result = await client!.CallToolAsync("spawn", new Dictionary<string, object?> { ["task"] = "t" });
+        var result = await client!.CallToolAsync("spawn", new Dictionary<string, object?> { ["task"] = task });
         return JsonDocument.Parse(Text(result)).RootElement.GetProperty("handle").GetString()!;
     }
+
+    private async Task<JsonElement> CallAsync(string tool, Dictionary<string, object?> arguments)
+    {
+        var result = await client!.CallToolAsync(tool, arguments);
+        Assert.NotEqual(true, result.IsError);
+        return JsonDocument.Parse(Text(result)).RootElement;
+    }
+
+    private Task<JsonElement> AwaitAsync(string handle) =>
+        CallAsync("await", new Dictionary<string, object?> { ["handles"] = new[] { handle }, ["timeoutSeconds"] = 30 });
+
+    private static McpClientHandlers Answering(bool allow, List<ModelContextProtocol.Protocol.ElicitRequestParams> asked) => new()
+    {
+        ElicitationHandler = (request, _) =>
+        {
+            asked.Add(request!);
+            return ValueTask.FromResult(new ModelContextProtocol.Protocol.ElicitResult
+            {
+                Action = "accept",
+                Content = new Dictionary<string, JsonElement> { ["allow"] = JsonSerializer.SerializeToElement(allow) },
+            });
+        },
+    };
 
     private static string Text(ModelContextProtocol.Protocol.CallToolResult result) =>
         Assert.IsType<ModelContextProtocol.Protocol.TextContentBlock>(Assert.Single(result.Content)).Text;
@@ -178,5 +205,46 @@ public sealed class McpEndToEndTests : IAsyncLifetime
         Assert.Equal(handle, JsonDocument.Parse(first.Message!).RootElement.GetProperty("handle").GetString());
         Assert.Equal(1, JsonDocument.Parse(turned.Message!).RootElement.GetProperty("turns").GetInt32());
         Assert.Contains("answer", Text(result));
+    }
+
+    [Theory]
+    [InlineData("2025-11-25", true, "dropped")]
+    [InlineData("2025-11-25", false, "kept")]
+    [InlineData("2026-07-28", true, "dropped")]
+    [InlineData("2026-07-28", false, "kept")]
+    public async Task A_client_with_elicitation_is_asked_during_await_and_its_answer_reaches_the_run(string protocolVersion, bool allow, string answer)
+    {
+        var asked = new List<ModelContextProtocol.Protocol.ElicitRequestParams>();
+        await ConnectAsync(protocolVersion, handlers: Answering(allow, asked));
+        var handle = await SpawnAsync("drop");
+
+        var run = Assert.Single((await AwaitAsync(handle)).EnumerateArray().ToList());
+
+        Assert.Equal(answer, run.GetProperty("answer").GetString());
+        var prompt = Assert.Single(asked);
+        Assert.Contains(handle, prompt.Message);
+        Assert.Contains("drop", prompt.Message);
+        Assert.Contains("allow", prompt.RequestedSchema!.Properties.Keys);
+    }
+
+    [Theory]
+    [InlineData("2025-11-25")]
+    [InlineData("2026-07-28")]
+    public async Task A_client_without_elicitation_sees_the_pending_approval_and_approve_resolves_it(string protocolVersion)
+    {
+        await ConnectAsync(protocolVersion);
+        var handle = await SpawnAsync("drop");
+
+        var paused = Assert.Single((await AwaitAsync(handle)).EnumerateArray().ToList());
+        var status = await CallAsync("status", new Dictionary<string, object?> { ["handle"] = handle });
+        var approved = await CallAsync("approve", new Dictionary<string, object?> { ["handle"] = handle, ["allow"] = true });
+        var finished = Assert.Single((await AwaitAsync(handle)).EnumerateArray().ToList());
+
+        Assert.Equal("AwaitingApproval", paused.GetProperty("status").GetString());
+        Assert.Equal("drop", paused.GetProperty("pendingApproval").GetProperty("tool").GetString());
+        Assert.Equal("users", paused.GetProperty("pendingApproval").GetProperty("arguments").GetProperty("table").GetString());
+        Assert.Equal("drop", status.GetProperty("pendingApproval").GetProperty("tool").GetString());
+        Assert.True(approved.GetProperty("decided").GetBoolean());
+        Assert.Equal("dropped", finished.GetProperty("answer").GetString());
     }
 }

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using ModelContextProtocol;
+using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
 
 namespace Luftpause.Runtime;
@@ -29,13 +30,14 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         [Description("Handle of the run this one belongs to; cancelling the parent cancels it.")] string? parent = null,
         [Description("Prompt plus completion tokens this run and every run under it may use; over it, the subtree is cancelled.")] long? budgetTokens = null,
         [Description("Tool calls this run and every run under it may make; over it, the subtree is cancelled.")] int? budgetToolCalls = null,
-        [Description("Wall-clock seconds this run may take, its subtree included; when they pass, the subtree is cancelled.")] double? budgetSeconds = null)
+        [Description("Wall-clock seconds this run may take, its subtree included; when they pass, the subtree is cancelled.")] double? budgetSeconds = null,
+        [Description("Tools whose every call waits for the user's approval, on top of tools their server marks destructive.")] string[]? approveTools = null)
     {
         var allowed = tools is { Length: > 0 } ? tools.ToHashSet(StringComparer.Ordinal) : null;
         try
         {
             var spec = new RunSpec(task, model ?? defaults.Model, serviceClass, system, Math.Max(maxToolCalls, 0), allowed, maxTokens > 0 ? maxTokens : null, parallelToolCalls, server.SessionId,
-                BudgetLimits.Of(budgetTokens, budgetToolCalls, budgetSeconds));
+                BudgetLimits.Of(budgetTokens, budgetToolCalls, budgetSeconds), approveTools is { Length: > 0 } ? approveTools.ToHashSet(StringComparer.Ordinal) : null);
             return new { handle = runs.Spawn(spec, parent).Handle };
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException)
@@ -51,15 +53,30 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
     [McpServerTool(Name = "await"), Description(
         "Wait for runs to finish. mode=all waits for every handle, mode=any returns when at least one is done. " +
         "Returns the state of every handle when it returns, including runs still in progress after the timeout. " +
-        "failedToolCalls counts tool calls that returned an error; when it equals toolCalls, the answer came from the model's own memory, not from tools.")]
+        "failedToolCalls counts tool calls that returned an error; when it equals toolCalls, the answer came from the model's own memory, not from tools. " +
+        "A run about to call a destructive tool waits for approval: clients with elicitation are asked here, " +
+        "others get the run back with status AwaitingApproval and pendingApproval {tool, arguments} and answer with approve.")]
     public Task<IReadOnlyList<RunView>> Await(
+        McpServer server,
+        RequestContext<CallToolRequestParams> context,
         [Description("Handles returned by spawn.")] string[] handles,
         IProgress<ProgressNotificationValue> progress,
         [Description("all (default) or any.")] string mode = "all",
         [Description("Longest time to wait, in seconds.")] int timeoutSeconds = 60,
-        CancellationToken cancellationToken = default) =>
-        runs.AwaitAsync(handles, !string.Equals(mode, "any", StringComparison.OrdinalIgnoreCase),
-            TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 0, 600)), new AwaitProgress(progress), null, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        ApprovalDelivery.Answer(runs, handles, context.Params?.InputResponses);
+        return runs.AwaitAsync(handles, !string.Equals(mode, "any", StringComparison.OrdinalIgnoreCase),
+            TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 0, 600)), new AwaitProgress(progress),
+            ApprovalDelivery.Asker(server, context, inTask: false, requestState: null), cancellationToken);
+    }
+
+    [McpServerTool(Name = "approve"), Description(
+        "Answer a run waiting with status AwaitingApproval: allow runs the pending tool call, deny tells the sub-agent the user declined it.")]
+    public object Approve(
+        [Description("Handle of the waiting run.")] string handle,
+        [Description("true to run the tool call, false to decline it.")] bool allow) =>
+        new { handle, decided = runs.Decide(handle, allow) };
 
     [McpServerTool(Name = "status", ReadOnly = true), Description("Current state of a run, without waiting.")]
     public object Status([Description("Handle returned by spawn.")] string handle) =>
