@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
-  "name": "io.github.luftpause/luftpause",
+  "name": "io.github.vmedvedovskiy/luftpause",
   "description": "async/await for LLM agents: spawn and await sub-agents scheduled on your own GPUs",
   "repository": {
     "url": "https://github.com/luftpause/luftpause",
     "source": "github"
   },
-  "version": "0.1.1",
+  "version": "0.1.2",
   "websiteUrl": "https://github.com/luftpause/luftpause",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/luftpause/runtime:v0.1.1",
-      "version": "0.1.1",
+      "identifier": "ghcr.io/luftpause/runtime:v0.1.2",
+      "version": "0.1.2",
       "transport": {
         "type": "streamable-http",
         "url": "http://localhost:7000/mcp"
