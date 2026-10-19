@@ -6,12 +6,12 @@
     "url": "https://github.com/luftpause/luftpause",
     "source": "github"
   },
-  "version": "0.1.2",
+  "version": "0.1.3",
   "websiteUrl": "https://github.com/luftpause/luftpause",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/luftpause/runtime:v0.1.2",
+      "identifier": "ghcr.io/luftpause/runtime:v0.1.3",
       "transport": {
         "type": "streamable-http",
         "url": "http://localhost:7000/mcp"
