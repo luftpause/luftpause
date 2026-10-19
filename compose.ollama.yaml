@@ -11,10 +11,13 @@ services:
     extra_hosts: ["host.docker.internal:host-gateway"]
 
   runtime:
-    environment:
+    environment: !override
+      DataPlane__Url: http://dataplane:8080/
+      LUFTPAUSE_TOKEN: ${LUFTPAUSE_TOKEN:-}
       Runtime__Model: ${OLLAMA_MODEL:-llama3.2:1b}
       Runtime__DecideModel: ${OLLAMA_MODEL:-llama3.2:1b}
-      Tools__Servers__1__Name: wikipedia
-      Tools__Servers__1__Command: /opt/tools/bin/wikipedia-mcp
-      Tools__Servers__1__Args__0: --transport
-      Tools__Servers__1__Args__1: stdio
+      Tools__Servers__0__Name: wikipedia
+      Tools__Servers__0__Command: /opt/tools/bin/wikipedia-mcp
+      Tools__Servers__0__Args__0: --transport
+      Tools__Servers__0__Args__1: stdio
+    depends_on: !override [dataplane]

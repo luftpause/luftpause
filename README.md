@@ -40,14 +40,15 @@ claude mcp add --transport http --scope local luftpause http://localhost:7000/mc
 Claude Code now has `spawn`, `await`, `run`, `status`, `cancel`, `approve`, `tools` and `decide`. The fake
 engines answer with filler, and the sub-agents' only tools are `fake-mcp`'s `lookup` and `deep_search`,
 which wait a random second or so and return filler too — enough to see the fan-out. For real answers from
-an Ollama already on your machine, with Wikipedia as a real tool beside the fake ones:
+an Ollama already on your machine, with Wikipedia as the sub-agents' tool instead of the fake ones:
 
 ```bash
-docker compose -f compose.yaml -f compose.ollama.yaml up -d scheduler dataplane runtime fake-mcp
+docker compose -f compose.yaml -f compose.ollama.yaml up -d scheduler dataplane runtime
 ```
 
-Pass `tools: ["get_summary", "search_wikipedia"]` to `spawn` to keep a sub-agent on Wikipedia. Wikipedia's API rate-limits
-anonymous callers, so a tool call can take tens of seconds while `wikipedia-mcp` retries.
+Wikipedia's API rate-limits anonymous callers, so a tool call can take tens of seconds while `wikipedia-mcp` retries.
+Llama 3.2 1B sometimes passes a tool's schema instead of its arguments; the runtime rejects the call and the
+sub-agent may answer without it, so ask again or pull a larger model.
 
 Ollama needs the model pulled (`ollama pull llama3.2:1b`, or set `OLLAMA_MODEL`)
 and must listen beyond loopback (`OLLAMA_HOST=0.0.0.0`) unless Docker Desktop
@@ -232,7 +233,7 @@ With a token: `LUFTPAUSE_TOKEN=<token> docker compose up -d`, then `claude mcp a
 An Ollama on the host as the only replica (model from `OLLAMA_MODEL`, default `llama3.2:1b`):
 
 ```bash
-docker compose -f compose.yaml -f compose.ollama.yaml up -d scheduler dataplane runtime fake-mcp
+docker compose -f compose.yaml -f compose.ollama.yaml up -d scheduler dataplane runtime
 ```
 
 On one GPU, two SGLang replicas of Llama-3.2-1B FP8 (the test bed used below):
