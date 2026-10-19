@@ -154,7 +154,7 @@ public sealed class RunApprovalTests : IDisposable
     {
         var registry = Registry(
             new RunSpawned("run-1", Spec, DateTimeOffset.UnixEpoch, null),
-            new RunApprovalDecided("run-1", "drop", JsonNode.Parse("""{"table":"users"}"""), true));
+            new RunApprovalDecided("run-1", "drop", JsonNode.Parse("""{"table":"users"}""")!, true));
 
         registry.ResumeAll();
 
@@ -177,7 +177,7 @@ public sealed class RunApprovalTests : IDisposable
     {
         var registry = Registry(
             new RunSpawned("run-1", Spec, DateTimeOffset.UnixEpoch, null),
-            new RunApprovalDecided("run-1", "drop", JsonNode.Parse("""{"table":"users"}"""), true),
+            new RunApprovalDecided("run-1", "drop", JsonNode.Parse("""{"table":"users"}""")!, true),
             new RunTurned("run-1", [], RunWork.None with { Turns = 1, ToolCalls = 1 }));
 
         registry.ResumeAll();
@@ -191,7 +191,7 @@ public sealed class RunApprovalTests : IDisposable
     {
         var registry = Registry(
             new RunSpawned("run-1", Spec, DateTimeOffset.UnixEpoch, null),
-            new RunApprovalDecided("run-1", "drop", JsonNode.Parse("""{"table":"orders"}"""), true));
+            new RunApprovalDecided("run-1", "drop", JsonNode.Parse("""{"table":"orders"}""")!, true));
 
         registry.ResumeAll();
 

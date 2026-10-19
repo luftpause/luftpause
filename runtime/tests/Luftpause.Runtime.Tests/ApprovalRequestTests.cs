@@ -37,8 +37,8 @@ public sealed class ApprovalRequestTests
     {
         var request = ApprovalRequest.Of(Call("""{"table":"users","cascade":true}"""));
 
-        Assert.True(request.Matches(new RunApprovalDecided("run-1", "drop", JsonNode.Parse("""{"cascade":true,"table":"users"}"""), true)));
-        Assert.False(request.Matches(new RunApprovalDecided("run-1", "drop", JsonNode.Parse("""{"table":"orders"}"""), true)));
-        Assert.False(request.Matches(new RunApprovalDecided("run-1", "truncate", JsonNode.Parse("""{"table":"users","cascade":true}"""), true)));
+        Assert.True(request.Matches(new RunApprovalDecided("run-1", "drop", JsonNode.Parse("""{"cascade":true,"table":"users"}""")!, true)));
+        Assert.False(request.Matches(new RunApprovalDecided("run-1", "drop", JsonNode.Parse("""{"table":"orders"}""")!, true)));
+        Assert.False(request.Matches(new RunApprovalDecided("run-1", "truncate", JsonNode.Parse("""{"table":"users","cascade":true}""")!, true)));
     }
 }
