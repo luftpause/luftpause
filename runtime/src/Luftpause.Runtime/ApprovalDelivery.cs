@@ -1,3 +1,4 @@
+using System.Text.Json;
 using ModelContextProtocol.Extensions.Tasks;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -18,11 +19,16 @@ public static class ApprovalDelivery
         ApprovalChannels.Sessionless(ProtocolVersion(request))
         && request.JsonRpcRequest.Context?.ClientCapabilities?.Extensions?.ContainsKey(TasksProtocol.ExtensionId) == true;
 
-    public static void Answer(RunRegistry runs, IReadOnlyList<string> handles, IDictionary<string, InputResponse>? responses)
+    public static void Answer(RunRegistry runs, IReadOnlyList<string> handles, IDictionary<string, InputResponse>? responses, ILogger log)
     {
         foreach (var (key, response) in responses ?? new Dictionary<string, InputResponse>())
+        {
+            var result = response.Deserialize(InputResponse.ElicitResultJsonTypeInfo);
+            log.LogInformation("approval_answered approval={Approval} action={Action} content={Content}",
+                key, result?.Action, result?.Content is { } content ? JsonSerializer.Serialize(content) : null);
             foreach (var handle in handles)
-                runs.Decide(handle, key, ApprovalPrompt.Allowed(response.Deserialize(InputResponse.ElicitResultJsonTypeInfo)));
+                runs.Decide(handle, key, ApprovalPrompt.Allowed(result));
+        }
     }
 
     private static string? ProtocolVersion(RequestContext<CallToolRequestParams> request) =>

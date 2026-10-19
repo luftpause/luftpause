@@ -12,7 +12,7 @@ public sealed class RuntimeDefaults
 }
 
 [McpServerToolType]
-public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog catalog, RuntimeDefaults defaults, TimeProvider time)
+public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog catalog, RuntimeDefaults defaults, TimeProvider time, ILogger<LuftpauseTools> log)
 {
     [McpServerTool(Name = "spawn"), Description(
         "Start a sub-agent run on the pooled local models and return its handle immediately. " +
@@ -62,7 +62,7 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
             ? runs.Find(resumed)?.Handle ?? throw new McpException($"unknown run '{resumed}' in requestState")
             : Start(server, task, model, serviceClass, system, maxToolCalls, tools, maxTokens, parallelToolCalls, parent,
                 budgetTokens, budgetToolCalls, budgetSeconds, approveTools);
-        ApprovalDelivery.Answer(runs, [handle], context.Params?.InputResponses);
+        ApprovalDelivery.Answer(runs, [handle], context.Params?.InputResponses, log);
         try
         {
             var views = await runs.AwaitAsync([handle], true, Timeout.InfiniteTimeSpan, new AwaitProgress(progress),
@@ -112,7 +112,7 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         [Description("Longest time to wait, in seconds.")] int timeoutSeconds = 60,
         CancellationToken cancellationToken = default)
     {
-        ApprovalDelivery.Answer(runs, handles, context.Params?.InputResponses);
+        ApprovalDelivery.Answer(runs, handles, context.Params?.InputResponses, log);
         return runs.AwaitAsync(handles, !string.Equals(mode, "any", StringComparison.OrdinalIgnoreCase),
             TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 0, 600)), new AwaitProgress(progress),
             ApprovalDelivery.Asker(server, context, inTask: false, requestState: null), cancellationToken);
