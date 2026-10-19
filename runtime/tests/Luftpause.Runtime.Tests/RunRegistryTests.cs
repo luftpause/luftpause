@@ -177,7 +177,7 @@ public sealed class RunRegistryTests : IDisposable
         var record = registry.Spawn(Spec);
         var watcher = new Watcher();
 
-        var waiting = registry.AwaitAsync([record.Handle], true, TimeSpan.FromSeconds(30), watcher, CancellationToken.None);
+        var waiting = registry.AwaitAsync([record.Handle], true, TimeSpan.FromSeconds(30), watcher, null, CancellationToken.None);
         Assert.Equal((RunStatus.Running, 0, 0), await watcher.NextAsync());
         step.Release();
         Assert.Equal((RunStatus.Running, 1, 0), await watcher.NextAsync());
@@ -201,7 +201,7 @@ public sealed class RunRegistryTests : IDisposable
         registry.ResumeAll();
         var watcher = new Watcher();
 
-        var views = await registry.AwaitAsync(["run-1"], true, TimeSpan.FromSeconds(30), watcher, CancellationToken.None);
+        var views = await registry.AwaitAsync(["run-1"], true, TimeSpan.FromSeconds(30), watcher, null, CancellationToken.None);
 
         Assert.Equal("answer", views[0].Answer);
         Assert.True(watcher.Idle);

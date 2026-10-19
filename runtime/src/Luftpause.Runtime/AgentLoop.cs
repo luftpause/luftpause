@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json.Nodes;
+using ModelContextProtocol.Protocol;
 
 namespace Luftpause.Runtime;
 
@@ -22,6 +23,7 @@ public sealed class AgentLoop(LlmClient llm, ToolCatalog tools, TimeProvider tim
     {
         var (runId, spec) = (start.RunId, start.Spec);
         var definitions = Allowed(await tools.DefinitionsAsync(cancel), spec.Tools);
+        var annotations = await tools.AnnotationsAsync(cancel);
         var messages = new JsonArray([.. start.Messages.Select(m => m.DeepClone())]);
         var work = start.Work;
 
@@ -52,7 +54,8 @@ public sealed class AgentLoop(LlmClient llm, ToolCatalog tools, TimeProvider tim
                 ["tool_calls"] = new JsonArray([.. calls.Select(c => (JsonNode)c.DeepClone())]),
             });
             var toolsStarted = time.GetTimestamp();
-            var results = await Task.WhenAll(calls.Select(c => CallReportedAsync(runId, c, cancel)));
+            var allowed = await AllowedAsync(start, calls, annotations, cancel);
+            var results = await Task.WhenAll(calls.Zip(allowed).Select(c => c.Second ? CallReportedAsync(runId, c.First, cancel) : Declined(runId, c.First)));
             foreach (var (call, result) in calls.Zip(results))
                 messages.Add(new JsonObject
                 {
@@ -63,6 +66,22 @@ public sealed class AgentLoop(LlmClient llm, ToolCatalog tools, TimeProvider tim
             work = work.AfterTools(calls.Count, results.Count(r => r.Failed), time.GetElapsedTime(toolsStarted));
             report(new RunProgress(work, [.. messages.Skip(reported).Select(m => m!.DeepClone().AsObject())]));
         }
+    }
+
+    private static async Task<IReadOnlyList<bool>> AllowedAsync(
+        RunStart start, IReadOnlyList<JsonObject> calls, IReadOnlyDictionary<string, ToolAnnotations?> annotations, CancellationToken cancel)
+    {
+        var allowed = new List<bool>(calls.Count);
+        foreach (var request in calls.Select(ApprovalRequest.Of))
+            allowed.Add(!ToolApproval.Needed(request.Tool, annotations.GetValueOrDefault(request.Tool), start.Spec.ApproveTools)
+                || await start.Approve(request, cancel));
+        return allowed;
+    }
+
+    private Task<ToolResult> Declined(string runId, JsonObject call)
+    {
+        log.LogInformation("tool_call_declined run={Run} tool={Tool}", runId, call["function"]?["name"]?.GetValue<string>());
+        return Task.FromResult(new ToolResult("Error: the user declined this tool call", true));
     }
 
     private void LogTurn(string runId, int turn, LlmReply reply, TimeSpan took) =>

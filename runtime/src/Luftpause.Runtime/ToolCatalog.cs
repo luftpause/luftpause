@@ -27,6 +27,12 @@ public sealed class ToolCatalog(IReadOnlyList<ToolServer> servers, ILoggerFactor
         return [.. all.Values.Select(t => (JsonNode)Definition(t.Tool.ProtocolTool))];
     }
 
+    public async Task<IReadOnlyDictionary<string, ToolAnnotations?>> AnnotationsAsync(CancellationToken cancel)
+    {
+        var all = await ToolsAsync(cancel);
+        return all.ToDictionary(t => t.Key, t => t.Value.Tool.ProtocolTool.Annotations);
+    }
+
     public async Task<IReadOnlyList<ToolInfo>> DescribeAsync(CancellationToken cancel)
     {
         var all = await ToolsAsync(cancel);

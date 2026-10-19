@@ -90,7 +90,7 @@ public sealed class RunRegistry(
             : null;
 
     public async Task<IReadOnlyList<RunView>> AwaitAsync(
-        IReadOnlyList<string> handles, bool all, TimeSpan timeout, IProgress<RunView> progress, CancellationToken cancel)
+        IReadOnlyList<string> handles, bool all, TimeSpan timeout, IProgress<RunView> progress, IApprovalAsker? asker, CancellationToken cancel)
     {
         var records = handles.Select(Find).OfType<RunRecord>().ToList();
         var deadline = Task.Delay(timeout, time, cancel);
@@ -99,11 +99,58 @@ public sealed class RunRegistry(
         {
             var signals = records.Select(r => r.WorkChanged).ToList();
             reported = Report(Views(records), reported, progress);
-            if (!Waiting(records, all) || deadline.IsCompleted)
+            if (asker is not null && Claim(records) is var (record, pending))
+            {
+                await AskAsync(record, pending, asker, cancel);
+                continue;
+            }
+            if (!Waiting(records, all) || deadline.IsCompleted || (asker is null && records.Any(r => r.Pending is { Open: true })))
                 break;
             await Task.WhenAny([deadline, .. signals, .. records.Select(r => r.Completion)]);
         }
         return Views(records);
+    }
+
+    public bool Decide(string handle, bool allow) =>
+        runs.TryGetValue(handle, out var record) && record.Pending is { } pending && Decide(record, pending, allow);
+
+    public bool Decide(string handle, string approvalId, bool allow) =>
+        runs.TryGetValue(handle, out var record) && record.Pending is { } pending && pending.Id == approvalId && Decide(record, pending, allow);
+
+    private bool Decide(RunRecord record, PendingApproval pending, bool allow) =>
+        pending.TryDecide(allow, decided => journal.Append(new RunApprovalDecided(record.Handle, pending.Request.Tool, pending.Request.Arguments, decided)));
+
+    private static (RunRecord, PendingApproval)? Claim(IReadOnlyList<RunRecord> records) =>
+        records.Select(r => (Record: r, Pending: r.Pending)).FirstOrDefault(p => p.Pending?.TryClaim() == true) is { Pending: { } pending } claimed
+            ? (claimed.Record, pending)
+            : null;
+
+    private async Task AskAsync(RunRecord record, PendingApproval pending, IApprovalAsker asker, CancellationToken cancel)
+    {
+        try
+        {
+            Decide(record, pending, await asker.AskAsync(record.Handle, pending, cancel));
+        }
+        finally
+        {
+            pending.Release();
+        }
+    }
+
+    private async Task<bool> ApproveAsync(RunRecord record, ApprovalRequest request, CancellationToken cancel)
+    {
+        if (record.TakeDecision(request) is { } earlier)
+            return earlier;
+        var pending = new PendingApproval(request);
+        record.Pending = pending;
+        try
+        {
+            return await pending.Decision.WaitAsync(cancel);
+        }
+        finally
+        {
+            record.Pending = null;
+        }
     }
 
     private List<RunView> Views(IReadOnlyList<RunRecord> records)
@@ -186,7 +233,7 @@ public sealed class RunRegistry(
         try
         {
             return await loop.RunAsync(
-                new RunStart(record.Handle, record.Spec, record.Messages, record.Work),
+                new RunStart(record.Handle, record.Spec, record.Messages, record.Work, (request, cancel) => ApproveAsync(record, request, cancel)),
                 progress => Progress(record, progress), record.Cancel.Token);
         }
         catch (OperationCanceledException)

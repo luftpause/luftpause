@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -9,6 +10,7 @@ namespace Luftpause.Runtime;
 [JsonDerivedType(typeof(RunSpawned), "spawned")]
 [JsonDerivedType(typeof(RunTurned), "turned")]
 [JsonDerivedType(typeof(RunFinished), "finished")]
+[JsonDerivedType(typeof(RunApprovalDecided), "approval")]
 public abstract record JournalRecord(string Handle);
 
 public sealed record RunSpawned(string Handle, RunSpec Spec, DateTimeOffset StartedAt, string? Parent) : JournalRecord(Handle);
@@ -17,7 +19,9 @@ public sealed record RunTurned(string Handle, IReadOnlyList<JsonObject> NewMessa
 
 public sealed record RunFinished(string Handle, RunOutcome Outcome, DateTimeOffset FinishedAt, BudgetOverrun? Exceeded = null) : JournalRecord(Handle);
 
-public sealed record ReplayedRun(RunSpawned Spawned, IReadOnlyList<RunTurned> Turns, RunFinished? Finished)
+public sealed record RunApprovalDecided(string Handle, string Tool, JsonNode? Arguments, bool Allow) : JournalRecord(Handle);
+
+public sealed record ReplayedRun(RunSpawned Spawned, IReadOnlyList<RunTurned> Turns, RunFinished? Finished, IReadOnlyList<RunApprovalDecided> OpenDecisions)
 {
     public static IReadOnlyList<ReplayedRun> From(IReadOnlyList<JournalRecord> history)
     {
@@ -27,8 +31,19 @@ public sealed record ReplayedRun(RunSpawned Spawned, IReadOnlyList<RunTurned> Tu
             throw new InvalidOperationException($"journal has a {orphan.GetType().Name} for unspawned run '{orphan.Handle}'");
         var turns = history.OfType<RunTurned>().ToLookup(t => t.Handle, StringComparer.Ordinal);
         var finished = history.OfType<RunFinished>().ToDictionary(f => f.Handle, StringComparer.Ordinal);
-        return [.. spawned.Select(s => new ReplayedRun(s, [.. turns[s.Handle]], finished.GetValueOrDefault(s.Handle)))];
+        var open = Unconsumed(history);
+        return [.. spawned.Select(s => new ReplayedRun(s, [.. turns[s.Handle]], finished.GetValueOrDefault(s.Handle), open.GetValueOrDefault(s.Handle, [])))];
     }
+
+    private static ImmutableDictionary<string, ImmutableList<RunApprovalDecided>> Unconsumed(IReadOnlyList<JournalRecord> history) =>
+        history.Aggregate(
+            ImmutableDictionary.Create<string, ImmutableList<RunApprovalDecided>>(StringComparer.Ordinal),
+            (open, record) => record switch
+            {
+                RunApprovalDecided decided => open.SetItem(decided.Handle, open.GetValueOrDefault(decided.Handle, []).Add(decided)),
+                RunTurned turned => open.Remove(turned.Handle),
+                _ => open,
+            });
 
     public RunRecord Record()
     {
@@ -37,6 +52,7 @@ public sealed record ReplayedRun(RunSpawned Spawned, IReadOnlyList<RunTurned> Tu
             Messages = [.. AgentLoop.InitialMessages(Spawned.Spec), .. Turns.SelectMany(t => t.NewMessages)],
             Work = Turns.Count > 0 ? Turns[^1].Work : RunWork.None,
             Exceeded = Finished?.Exceeded,
+            Decisions = OpenDecisions,
         };
         if (Finished is not null)
         {

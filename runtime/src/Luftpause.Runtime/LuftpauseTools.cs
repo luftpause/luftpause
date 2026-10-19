@@ -59,7 +59,7 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         [Description("Longest time to wait, in seconds.")] int timeoutSeconds = 60,
         CancellationToken cancellationToken = default) =>
         runs.AwaitAsync(handles, !string.Equals(mode, "any", StringComparison.OrdinalIgnoreCase),
-            TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 0, 600)), new AwaitProgress(progress), cancellationToken);
+            TimeSpan.FromSeconds(Math.Clamp(timeoutSeconds, 0, 600)), new AwaitProgress(progress), null, cancellationToken);
 
     [McpServerTool(Name = "status", ReadOnly = true), Description("Current state of a run, without waiting.")]
     public object Status([Description("Handle returned by spawn.")] string handle) =>
