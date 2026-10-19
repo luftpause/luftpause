@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.luftpause/luftpause",
+  "description": "async/await for LLM agents: spawn and await sub-agents scheduled on your own GPUs, every tool call a scheduled await",
+  "repository": {
+    "url": "https://github.com/luftpause/luftpause",
+    "source": "github"
+  },
+  "version": "0.1.1",
+  "websiteUrl": "https://github.com/luftpause/luftpause",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/luftpause/runtime:v0.1.1",
+      "version": "0.1.1",
+      "transport": {
+        "type": "streamable-http",
+        "url": "http://localhost:7000/mcp"
+      },
+      "environmentVariables": [
+        {
+          "name": "Runtime__Model",
+          "description": "Model the sub-agents run on, as served by an engine behind the luftpause dataplane",
+          "isRequired": true,
+          "format": "string"
+        },
+        {
+          "name": "DataPlane__Url",
+          "description": "URL of the luftpause dataplane that places each turn on the engine pool",
+          "default": "http://dataplane:8080/",
+          "format": "string"
+        },
+        {
+          "name": "LUFTPAUSE_TOKEN",
+          "description": "Bearer token required on the MCP endpoint and sent to the dataplane; unset leaves both open",
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

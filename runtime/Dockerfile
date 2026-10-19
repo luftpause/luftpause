@@ -8,6 +8,7 @@ ARG VERSION=dev
 LABEL org.opencontainers.image.source=https://github.com/luftpause/luftpause
 LABEL org.opencontainers.image.version=$VERSION
 LABEL org.opencontainers.image.licenses=BUSL-1.1
+LABEL io.modelcontextprotocol.server.name="io.github.luftpause/luftpause"
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-venv \
  && rm -rf /var/lib/apt/lists/* \
