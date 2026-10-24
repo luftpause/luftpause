@@ -14,9 +14,12 @@ public sealed class RuntimeDefaults
 [McpServerToolType]
 public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog catalog, RuntimeDefaults defaults, TimeProvider time, ILogger<LuftpauseTools> log)
 {
-    [McpServerTool(Name = "spawn"), Description(
-        "Start a sub-agent run on the pooled local models and return its handle immediately. " +
-        "The run uses the configured tool servers. Collect the result later with await.")]
+    [McpServerTool(Name = "spawn", Destructive = false, Idempotent = false, OpenWorld = true), Description(
+        "Start a sub-agent run on the pooled models and return {handle} at once, without waiting for it; use run instead to start one and block until it finishes. " +
+        "The sub-agent loops over model turns and calls the configured tool servers (list them with tools). " +
+        "Collect results with await, look at one run with status, stop it with cancel. " +
+        "A tool call that needs approval pauses the run as AwaitingApproval until it is answered in await or with approve. " +
+        "An unknown parent handle or invalid arguments fail the call; a run that later fails, runs out of budget or is cancelled keeps its handle and reports Failed or Cancelled with an error.")]
     public object Spawn(
         McpServer server,
         [Description("What the sub-agent should do.")] string task,
@@ -35,7 +38,7 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         new { handle = Start(server, task, model, serviceClass, system, maxToolCalls, tools, maxTokens, parallelToolCalls, parent,
             budgetTokens, budgetToolCalls, budgetSeconds, approveTools) };
 
-    [McpServerTool(Name = "run"), Description(
+    [McpServerTool(Name = "run", Destructive = false, Idempotent = false, OpenWorld = true), Description(
         "Spawn a sub-agent run and wait in the same call until it finishes; takes the same arguments as spawn and returns the run as await does. " +
         "Clients that opt into MCP Tasks get a task to poll instead, and an approval inside the run arrives as the task's input request. " +
         "Other clients are asked approvals the way await asks them; without elicitation the call returns the run with status AwaitingApproval. Cancelling the call cancels the run.")]
@@ -93,13 +96,13 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
         }
     }
 
-    [McpServerTool(Name = "tools", ReadOnly = true), Description(
+    [McpServerTool(Name = "tools", ReadOnly = true, Idempotent = true), Description(
         "List the tools sub-agents can use, with the server each comes from. Pass names to spawn(tools: [...]) to restrict a run.")]
     public Task<IReadOnlyList<ToolInfo>> Tools(CancellationToken cancellationToken = default) => catalog.DescribeAsync(cancellationToken);
 
-    [McpServerTool(Name = "await"), Description(
-        "Wait for runs to finish. mode=all waits for every handle, mode=any returns when at least one is done. " +
-        "Returns the state of every handle when it returns, including runs still in progress after the timeout. " +
+    [McpServerTool(Name = "await", Destructive = false, OpenWorld = false), Description(
+        "Wait for runs to finish. mode=all waits for every handle, mode=any returns when at least one is done; use status to look without waiting. " +
+        "Returns every known handle's state, with the same fields as status, including runs still in progress after the timeout; unknown handles are left out. " +
         "failedToolCalls counts tool calls that returned an error; when it equals toolCalls, the answer came from the model's own memory, not from tools. " +
         "A run about to call a destructive tool waits for approval: clients with elicitation are asked here, " +
         "others get the run back with status AwaitingApproval and pendingApproval {tool, arguments} and answer with approve.")]
@@ -118,22 +121,33 @@ public sealed class LuftpauseTools(RunRegistry runs, LlmClient llm, ToolCatalog 
             ApprovalDelivery.Asker(server, context, inTask: false, requestState: null), cancellationToken);
     }
 
-    [McpServerTool(Name = "approve"), Description(
-        "Answer a run waiting with status AwaitingApproval: allow runs the pending tool call, deny tells the sub-agent the user declined it.")]
+    [McpServerTool(Name = "approve", Idempotent = true, OpenWorld = false), Description(
+        "Answer a run waiting with status AwaitingApproval when the client was not asked through elicitation: " +
+        "allow=true runs the pending tool call, allow=false tells the sub-agent the user declined it. " +
+        "Find waiting runs with await or status, whose pendingApproval shows the tool and its arguments. " +
+        "Returns {handle, decided}; decided is false when the handle is unknown or the run has no pending approval.")]
     public object Approve(
         [Description("Handle of the waiting run.")] string handle,
         [Description("true to run the tool call, false to decline it.")] bool allow) =>
         new { handle, decided = runs.Decide(handle, allow) };
 
-    [McpServerTool(Name = "status", ReadOnly = true), Description("Current state of a run, without waiting.")]
+    [McpServerTool(Name = "status", ReadOnly = true, Idempotent = true, OpenWorld = false), Description(
+        "Read one run's current state at once, without waiting; use await to block until runs finish. " +
+        "Returns handle, status (Running, AwaitingApproval, Completed, Failed or Cancelled), answer once Completed, error once Failed or Cancelled, " +
+        "parent and children handles, turns, toolCalls, failedToolCalls, prompt, cached and completion tokens, elapsedSeconds, budget when one was set, " +
+        "and pendingApproval {tool, arguments} while AwaitingApproval. An unknown handle returns {handle, error: \"unknown handle\"}.")]
     public object Status([Description("Handle returned by spawn.")] string handle) =>
         runs.Find(handle) is { } record ? runs.View(record, time.GetUtcNow()) : (object)new { handle, error = "unknown handle" };
 
-    [McpServerTool(Name = "cancel"), Description("Cancel a run that is still in progress, and every run spawned under it.")]
+    [McpServerTool(Name = "cancel", Destructive = true, Idempotent = true, OpenWorld = false), Description(
+        "Stop a run and every run spawned under it. It cannot be undone: each stopped run ends as Cancelled without an answer. " +
+        "Returns {handle, cancelled}; cancelled is true when the run or one of its descendants was still in progress, " +
+        "false when the handle is unknown or everything had already finished, so calling it again is harmless. " +
+        "Use status or await to read the final state.")]
     public object Cancel([Description("Handle returned by spawn.")] string handle) =>
         new { handle, cancelled = runs.Cancel(handle) };
 
-    [McpServerTool(Name = "decide", ReadOnly = true), Description(
+    [McpServerTool(Name = "decide", ReadOnly = true, OpenWorld = false), Description(
         "One-pass typed decision: returns labels with probabilities for the input. " +
         "Without labels, a single-pass model answers with its own label set. " +
         "With labels, a generative model scores them by the logprob of its first answer token.")]
