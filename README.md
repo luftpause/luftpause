@@ -35,7 +35,7 @@ docker compose up -d                # fake engines, no GPU needed
 claude mcp add --transport http --scope local luftpause http://localhost:7000/mcp
 ```
 
-`docker compose up -d` pulls the published images; add `--build` to build them from source instead (first build takes a few minutes). It pulls `latest`; pin a release with `LUFTPAUSE_VERSION=v0.1.3 docker compose up -d`. The runtime is also listed in the [official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=luftpause) as `io.github.vmedvedovskiy/luftpause`.
+`docker compose up -d` pulls the published images; add `--build` to build them from source instead (first build takes a few minutes). It pulls `latest`; pin a release with `LUFTPAUSE_VERSION=v0.1.4 docker compose up -d`. The runtime is also listed in the [official MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=luftpause) as `io.github.vmedvedovskiy/luftpause`.
 
 Claude Code now has `spawn`, `await`, `run`, `status`, `cancel`, `approve`, `tools` and `decide`. The fake
 engines answer with filler, and the sub-agents' only tools are `fake-mcp`'s `lookup` and `deep_search`,
